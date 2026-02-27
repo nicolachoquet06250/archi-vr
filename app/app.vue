@@ -55,7 +55,7 @@ function handleAddLayer() {
             v-for="layer in layers" 
             :key="layer.id"
             class="flex items-center justify-between p-2 rounded hover:bg-gray-50 border"
-            :class="{'border-blue-500 bg-blue-50': layer.id === currentLayer.id}"
+            :class="{'border-blue-500 bg-blue-50': layer.id === currentLayer?.id}"
           >
             <div class="flex items-center gap-2 overflow-hidden">
               <input 

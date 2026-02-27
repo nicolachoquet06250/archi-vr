@@ -182,7 +182,7 @@ export function useProjectStore() {
       if (oldWall) {
         const index = oldWall.openings.findIndex(o => o.id === openingId)
         if (index !== -1) {
-          openingToMove = oldWall.openings.splice(index, 1)[0]
+          openingToMove = oldWall.openings.splice(index, 1)[0]!
         }
       }
     })

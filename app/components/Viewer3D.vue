@@ -59,7 +59,7 @@ function checkCollision(position: THREE.Vector3, direction: THREE.Vector3, dista
     })
 
     // S'il y a une intersection à une distance inférieure au seuil, collision
-    if (blockingIntersects.length > 0 && blockingIntersects[0].distance < distance + collisionRadius) {
+    if (blockingIntersects.length > 0 && blockingIntersects[0]!.distance < distance + collisionRadius) {
       return true
     }
   }
@@ -187,18 +187,18 @@ function ensureSafeSpawn(forceRandomDoor = false) {
     }
 
     // Tester les deux côtés de la porte (à 5m)
-    const pos1 = door.pos.clone().add(door.normal.clone().multiplyScalar(5))
-    const pos2 = door.pos.clone().add(door.normal.clone().multiplyScalar(-5))
+    const pos1 = door?.pos.clone().add(door.normal.clone().multiplyScalar(5))
+    const pos2 = door?.pos.clone().add(door.normal.clone().multiplyScalar(-5))
     
     // Celui qui est le plus loin du centre est considéré comme "l'extérieur"
-    const dist1 = pos1.distanceTo(center)
-    const dist2 = pos2.distanceTo(center)
+    const dist1 = pos1!.distanceTo(center)
+    const dist2 = pos2!.distanceTo(center)
     
     const spawnPos = dist1 > dist2 ? pos1 : pos2
-    camera.position.copy(spawnPos)
+    camera.position.copy(spawnPos!)
     
     // Orienter la caméra vers la porte
-    camera.lookAt(door.pos)
+    camera.lookAt(door!.pos)
     // Forcer la rotation YXZ et s'assurer que X/Z sont propres (on regarde horizontalement)
     const targetRotationY = camera.rotation.y
     camera.rotation.set(0, targetRotationY, 0, 'YXZ')
