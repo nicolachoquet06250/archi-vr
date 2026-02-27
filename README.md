@@ -1,6 +1,6 @@
-# Nuxt Minimal Starter
+# Archi VR
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment
 
 ## Run in local
 
