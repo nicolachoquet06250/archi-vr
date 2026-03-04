@@ -3,6 +3,7 @@ import AppHeaderZone from "~/components/V2/AppHeaderZone.vue";
 import Compass from "~/components/V2/Compass.vue";
 import BuildZoneTabs from "~/components/V2/BuildZoneTabs.vue";
 import Toolbar from "~/components/V2/Toolbar.vue";
+import DrawingZone from "~/components/V2/DrawingZone.vue";
 
 const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
@@ -19,6 +20,7 @@ const {toolbarSide} = useToolbar()
     </aside>
 
     <section :class="$style.buildZone">
+      <DrawingZone />
       <BuildZoneTabs />
 
       <Toolbar
@@ -70,6 +72,7 @@ const {toolbarSide} = useToolbar()
   height: 100%;
   background-color: #ffffff;
   position: relative;
+  overflow: hidden;
 }
 .propertiesZone {
   width: 200px;
