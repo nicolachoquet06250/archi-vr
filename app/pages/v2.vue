@@ -7,6 +7,18 @@ import DrawingZone from "~/components/V2/DrawingZone.vue";
 
 const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
+
+useSeoMeta({
+  title: 'ArchiVR - Villa Océane',
+  description: `création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment`,
+  ogImage: '/logo.png',
+  ogTitle: 'ArchiVR - Villa Océane',
+  ogDescription: `création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment`,
+  twitterCard: 'summary_large_image',
+  twitterTitle: 'ArchiVR - Villa Océane',
+  twitterImage: '/logo.png',
+  twitterDescription: `création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment`,
+})
 </script>
 
 <template>
