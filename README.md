@@ -2,6 +2,10 @@
 
 Création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment
 
+![GitHub Actions Alwaysdata Workflow Status](https://img.shields.io/github/actions/workflow/status/nicolachoquet06250/archi-vr/deploy-alwaysdata.yml?label=Application%20d%C3%A9ploy%C3%A9e)
+![Website Status](https://img.shields.io/website?url=https%3A%2F%2Farchi-vr.nicovers06.fr&label=Application)
+![GitHub Actions Docker Workflow Status](https://img.shields.io/github/actions/workflow/status/nicolachoquet06250/archi-vr/docker-publish.yml?label=Image%20docker%20d%C3%A9ploy%C3%A9e)
+
 ## Run in local
 
 ### Via docker compose
