@@ -26,7 +26,7 @@ ENV HOST=0.0.0.0
 ENV PORT=3000
 
 # Copier uniquement la sortie du build
-COPY --from=builder /app/.output ./.output
+COPY --from=builder /app/.output ./output
 
 # Exposer le port par défaut
 EXPOSE 3000
