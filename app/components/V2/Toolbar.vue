@@ -11,9 +11,9 @@ withDefaults(defineProps<{
 
 const $styles = useCssModule()
 
-const {selectedTool, selectTool, resetView} = useToolbar();
+const {selectedTool, selectTool, resetView, zoomIn, zoomOut, zoom} = useToolbar();
 
-const isActive = (tool: ToolbarSelectedTool) => ({
+const isActive = (tool: string) => ({
   [$styles.active]: selectedTool.value === tool
 });
 
@@ -60,15 +60,21 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
 
   <ul>
     <li>
-      <button :class="isActive('zoom-in')" @click="selectTool('zoom-in')">
+      <button @click="zoomIn">
         <svg :width="20" :height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path fill-rule="evenodd" clip-rule="evenodd" d="M5 10C5 7.23858 7.23858 5 10 5C12.7614 5 15 7.23858 15 10C15 11.381 14.4415 12.6296 13.5355 13.5355C12.6296 14.4415 11.381 15 10 15C7.23858 15 5 12.7614 5 10ZM10 3C6.13401 3 3 6.13401 3 10C3 13.866 6.13401 17 10 17C11.5719 17 13.0239 16.481 14.1921 15.6063L19.2929 20.7071C19.6834 21.0976 20.3166 21.0976 20.7071 20.7071C21.0976 20.3166 21.0976 19.6834 20.7071 19.2929L15.6063 14.1921C16.481 13.0239 17 11.5719 17 10C17 6.13401 13.866 3 10 3ZM11 8C11 7.44772 10.5523 7 10 7C9.44772 7 9 7.44772 9 8V9H8C7.44772 9 7 9.44772 7 10C7 10.5523 7.44772 11 8 11H9V12C9 12.5523 9.44772 13 10 13C10.5523 13 11 12.5523 11 12V11H12C12.5523 11 13 10.5523 13 10C13 9.44772 12.5523 9 12 9H11V8Z" fill="#ffffff"/>
         </svg>
       </button>
     </li>
 
+    <li :class="$style.zoomLevel">
+      <button @click="resetView">
+        <span>{{ Math.round(zoom * 100) }}%</span>
+      </button>
+    </li>
+
     <li>
-      <button :class="isActive('zoom-out')" @click="selectTool('zoom-out')">
+      <button @click="zoomOut">
         <svg :width="20" :height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path fill-rule="evenodd" clip-rule="evenodd" d="M5 10C5 7.23858 7.23858 5 10 5C12.7614 5 15 7.23858 15 10C15 11.381 14.4415 12.6296 13.5355 13.5355C12.6296 14.4415 11.381 15 10 15C7.23858 15 5 12.7614 5 10ZM10 3C6.13401 3 3 6.13401 3 10C3 13.866 6.13401 17 10 17C11.5719 17 13.0239 16.481 14.1921 15.6063L19.2929 20.7071C19.6834 21.0976 20.3166 21.0976 20.7071 20.7071C21.0976 20.3166 21.0976 19.6834 20.7071 19.2929L15.6063 14.1921C16.481 13.0239 17 11.5719 17 10C17 6.13401 13.866 3 10 3ZM8 9C7.44772 9 7 9.44772 7 10C7 10.5523 7.44772 11 8 11H12C12.5523 11 13 10.5523 13 10C13 9.44772 12.5523 9 12 9H8Z" fill="#ffffff"/>
         </svg>
@@ -182,12 +188,19 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
   position: relative;
   z-index: 2;
 
+  * {
+    color: #ffffff;
+    font-size: 8.5px;
+  }
+
   &.vertical > ul {
     display: flex;
     flex-direction: column;
     margin: 1px 0;
 
     > li {
+      width: 100%;
+
       &:first-of-type button {
         border-top-left-radius: 10px;
         border-top-right-radius: 10px;
@@ -206,6 +219,10 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
     margin: 0 1px;
 
     > li {
+      > button > span {
+        font-size: 20px;
+      }
+
       &:first-of-type button {
         border-top-left-radius: 10px;
         border-bottom-left-radius: 10px;
@@ -229,6 +246,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
       padding: 5px;
       cursor: pointer;
       background-color: #33353a;
+      width: 100%;
 
       &:hover, &.active {
         background-color: #3a80b6;

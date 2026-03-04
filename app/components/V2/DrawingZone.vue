@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { selectedTool, resetTrigger } = useToolbar()
+const { selectedTool, resetTrigger, zoomInTrigger, zoomOutTrigger, zoom, zoomIn, zoomOut, resetView } = useToolbar()
 
 const isDragging = ref(false)
 const panX = ref(0)
@@ -21,6 +21,37 @@ watch(resetTrigger, () => {
   }, 300)
 })
 
+const onWheel = (event: WheelEvent) => {
+  if (event.ctrlKey) {
+    event.preventDefault()
+    if (event.deltaY < 0) {
+      zoomIn()
+    } else {
+      zoomOut()
+    }
+  }
+}
+
+const onKeyDown = (event: KeyboardEvent) => {
+  if (event.ctrlKey) {
+    if (event.key === '+' || event.key === '=') {
+      event.preventDefault()
+      zoomIn()
+    } else if (event.key === '-' || event.key === '_') {
+      event.preventDefault()
+      zoomOut()
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown)
+})
+
 const onMouseDown = (event: MouseEvent) => {
   if (selectedTool.value !== 'move') return
   isDragging.value = true
@@ -31,8 +62,8 @@ const onMouseDown = (event: MouseEvent) => {
 const onMouseMove = (event: MouseEvent) => {
   if (!isDragging.value || selectedTool.value !== 'move') return
   
-  const deltaX = event.clientX - lastMouseX.value
-  const deltaY = event.clientY - lastMouseY.value
+  const deltaX = (event.clientX - lastMouseX.value)
+  const deltaY = (event.clientY - lastMouseY.value)
   
   panX.value += deltaX
   panY.value += deltaY
@@ -61,6 +92,7 @@ const cursorStyle = computed(() => {
     @mousemove="onMouseMove"
     @mouseup="onMouseUp"
     @mouseleave="onMouseUp"
+    @wheel="onWheel"
   >
     <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -76,7 +108,7 @@ const cursorStyle = computed(() => {
       </defs>
 
       <g 
-        :transform="`translate(${panX}, ${panY})`"
+        :transform="`translate(${panX}, ${panY}) scale(${zoom})`"
         :class="{ [$style.transitioning]: isResetting }"
       >
         <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#grid)" />
