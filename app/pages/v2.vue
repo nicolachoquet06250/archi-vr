@@ -3,7 +3,6 @@ import AppHeaderZone from "~/components/V2/AppHeaderZone.vue";
 import Compass from "~/components/V2/Compass.vue";
 import BuildZoneTabs from "~/components/V2/BuildZoneTabs.vue";
 import Toolbar from "~/components/V2/Toolbar.vue";
-import {useToolbar} from "~/composables/toolbar";
 
 const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
