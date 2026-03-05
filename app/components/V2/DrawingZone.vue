@@ -478,6 +478,44 @@ const onTouchStart = (event: TouchEvent) => {
 }
 
 const onTouchMove = (event: TouchEvent) => {
+  if (isResizing.value && selectedOpeningId.value) {
+    const point = getSvgPoint(event.touches[0]!)
+    
+    // Trouver le mur et l'ouverture correspondante
+    for (const wall of walls.value) {
+      const openingIndex = wall.openings.findIndex(o => o.id === selectedOpeningId.value)
+      if (openingIndex !== -1) {
+        const opening = wall.openings[openingIndex]
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const wallLength = Math.sqrt(dx * dx + dy * dy)
+        
+        // Projection du point de la souris sur le mur pour obtenir le nouveau 't' (position relative)
+        let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / (wallLength * wallLength)
+        t = Math.max(0, Math.min(1, t))
+        
+        if (isResizing.value === 'right') {
+          // Calculer la nouvelle largeur en fonction de la distance entre le point de départ actuel et le point de la souris
+          const currentStartPos = opening.position
+          const newWidth = (t - currentStartPos) * wallLength
+          if (newWidth > 1) { // Largeur minimale de 1 unité SVG
+            opening.width = newWidth
+          }
+        } else if (isResizing.value === 'left') {
+          // On déplace le point de départ et on ajuste la largeur
+          const currentEndPos = opening.position + (opening.width / wallLength)
+          const newWidth = (currentEndPos - t) * wallLength
+          if (newWidth > 1) {
+            opening.position = t
+            opening.width = newWidth
+          }
+        }
+        break
+      }
+    }
+    return
+  }
+
   if (selectedTool.value !== 'move') return
 
   if (event.touches.length === 1 && isDragging.value) {
@@ -493,6 +531,7 @@ const onTouchMove = (event: TouchEvent) => {
 }
 
 const onTouchEnd = (event: TouchEvent) => {
+  isResizing.value = null
   if (event.touches.length === 0) {
     isDragging.value = false
   } else if (event.touches.length === 1) {
@@ -807,12 +846,14 @@ const selectedWallMeasurementLines = computed(() => {
                   fill="white" stroke="orange" stroke-width="2" 
                   :style="{ cursor: resizeCursorStyle }"
                   @mousedown.stop="isResizing = 'left'"
+                  @touchstart.stop="isResizing = 'left'"
                 />
                 <circle 
                   :cx="opening.width" cy="0" r="4" 
                   fill="white" stroke="orange" stroke-width="2" 
                   :style="{ cursor: resizeCursorStyle }"
                   @mousedown.stop="isResizing = 'right'"
+                  @touchstart.stop="isResizing = 'right'"
                 />
               </template>
             </g>
