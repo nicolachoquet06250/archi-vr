@@ -18,6 +18,7 @@
 <style module>
 header {
   background-color: #e4ebf3;
+  height: 79px;
 
   > div {
     display: flex;

@@ -15,3 +15,4 @@ export {default as Plan2D} from './plan2d.vue'
 // @ts-ignore
 export {default as Plan3D} from './plan3d.vue'
 export {default as PlanVR} from './planvr.vue'
+export {default as MoreIcon} from './more.vue'

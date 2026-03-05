@@ -70,6 +70,7 @@ onMounted(() => {
           }]"
           :horizontal="['top', 'bottom'].includes(toolbarSide)"
           :vertical="['left', 'right'].includes(toolbarSide)"
+          :side="toolbarSide"
       />
 
       <Compass
@@ -102,7 +103,7 @@ onMounted(() => {
 .mainZone {
   display: flex;
   flex-direction: row;
-  height: calc(100% - 98.5px);
+  min-height: calc(100% - (79px + 21px));
   background-color: #303538;
 }
 
@@ -111,7 +112,7 @@ onMounted(() => {
 }
 .buildZone {
   flex: 1;
-  height: 100%;
+  min-height: 100%;
   background-color: #ffffff;
   position: relative;
   overflow: hidden;
