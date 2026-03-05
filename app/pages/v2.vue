@@ -58,11 +58,11 @@ useSeoMeta({
 
 let observer: ResizeObserver | null = null;
 
-const isActive = (tool: ToolbarSelectedTool) => ({
+const isActive = (tool: ToolbarMenuSelectedTool) => ({
   [$styles.active]: selectedTool.value === tool
 })
-const isPossibleActive = (tools: ToolbarSelectedTool[]) => ({
-  [$styles.active]: tools.includes(selectedTool.value)
+const isPossibleActive = (tools: ToolbarMenuSelectedTool[]) => ({
+  [$styles.active]: selectedTool.value && tools.includes(selectedTool.value)
 })
 
 onMounted(() => {
