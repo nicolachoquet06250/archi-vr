@@ -1,0 +1,19 @@
+<script setup lang="ts">
+withDefaults(defineProps<{
+  width?: number;
+  height?: number;
+  size?: number;
+  color?: string;
+}>(), {
+  color: '#ffffff'
+})
+</script>
+
+<template>
+  <svg :width="size ?? width" :height="size ?? height" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M8.976 21C4.05476 21 3 19.9452 3 15.024" :stroke="color" stroke-width="2" stroke-linecap="round"/>
+    <path d="M21 15.024C21 19.9452 19.9452 21 15.024 21" :stroke="color" stroke-width="2" stroke-linecap="round"/>
+    <path d="M15.024 3C19.9452 3 21 4.05476 21 8.976" :stroke="color" stroke-width="2" stroke-linecap="round"/>
+    <path d="M3 8.976C3 4.05476 4.05476 3 8.976 3" :stroke="color" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+</template>
