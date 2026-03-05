@@ -28,7 +28,8 @@ const isSnapped = computed(() => {
 const drawingZoneRef = ref<HTMLElement | null>(null)
 
 usePinch(({ offset: [scale] }) => {
-  if (selectedTool.value !== 'move') return
+  if (selectedTool.value !== 'move') return;
+  if (scale > 2000 || scale <= -2000) return;
   setZoom(scale)
 }, {
   domTarget: drawingZoneRef,

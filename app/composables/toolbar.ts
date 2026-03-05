@@ -34,10 +34,12 @@ export const useToolbar = () => ({
         zoom.value = 1;
     },
     zoomIn: () => {
+        if (zoom.value > 2000) return;
         zoomInTrigger.value++;
         zoom.value *= 1.2;
     },
     zoomOut: () => {
+        if (zoom.value < 2000) return;
         zoomOutTrigger.value++;
         zoom.value /= 1.2;
     },
