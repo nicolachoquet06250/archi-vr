@@ -286,7 +286,7 @@ onUnmounted(() => {
     <aside ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
       <nav :class="$style.title" @click="toggleProperties">
         <span v-if="isCompact" :class="$style.toggleIcon">
-          <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: !isPropertiesOpen }]" />
+          <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: isPropertiesOpen }]" />
         </span>
         <span v-show="!isCompact || isPropertiesOpen">Properties</span>
       </nav>
@@ -506,6 +506,14 @@ onUnmounted(() => {
 .chevron {
   margin-left: auto;
   transition: transform 0.3s ease;
+
+  &.expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.menuZone .chevron {
+  transform: rotate(180deg);
 
   &.expanded {
     transform: rotate(90deg);
