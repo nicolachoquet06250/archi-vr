@@ -1,6 +1,8 @@
 # Archi VR
 
-Création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment
+ArchiVR est **un logiciel d'architecture complet** avec la **spécificité** qu'il intègre une **visualisation 3D du bâtiment**, mais également une **visualisation en réalité virtuelle**, ce qui pourrait vous permettre de faire une **visite guidée immersive du bâtiment à vos clients**.
+
+C'est le **premier logiciel d'architecture entièrement responsive** donc **accessible et utilisable sur mobiles et tablettes**.
 
 [![GitHub Actions Alwaysdata Workflow Status](https://img.shields.io/github/actions/workflow/status/nicolachoquet06250/archi-vr/deploy-alwaysdata.yml?label=Application%20d%C3%A9ploy%C3%A9e)](https://archi-vr.nicovers06.fr)
 [![Website Status](https://img.shields.io/website?url=https%3A%2F%2Farchi-vr.nicovers06.fr&label=Application)](https://archi-vr.nicovers06.fr)
@@ -27,11 +29,9 @@ npm run dev
 docker compose -f docker-compose.prod.yml up
 ```
 
+## New design
 
-
-## For new design
-
-- Go to http://localhost:3000/v2
+> https://archi-vr.nicovers06.fr/v2
 
 **Actual available version**
 ![Actual available version](./public/screenshot-actual-version.png)
