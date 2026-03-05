@@ -17,6 +17,11 @@ interface Wall {
   openings: Opening[];
 }
 
+interface Zone {
+  id: string;
+  points: Point[];
+}
+
 interface Opening {
   id: string;
   type: 'door' | 'window';
@@ -32,6 +37,122 @@ const selectedOpeningId = ref<string | null>(null)
 const firstPoint = ref<Point | null>(null)
 const initialPoint = ref<Point | null>(null)
 const mousePos = ref<Point | null>(null)
+
+const zones = computed<Zone[]>(() => {
+  if (walls.value.length < 3) return []
+
+  // On crée un graphe d'adjacence
+  const adj = new Map<string, Set<string>>()
+  const pointsMap = new Map<string, Point>()
+
+  const getPointKey = (p: Point) => `${Math.round(p.x)},${Math.round(p.y)}`
+
+  walls.value.forEach(wall => {
+    const k1 = getPointKey(wall.start)
+    const k2 = getPointKey(wall.end)
+    
+    if (!adj.has(k1)) adj.set(k1, new Set())
+    if (!adj.has(k2)) adj.set(k2, new Set())
+    
+    adj.get(k1)!.add(k2)
+    adj.get(k2)!.add(k1)
+    
+    pointsMap.set(k1, wall.start)
+    pointsMap.set(k2, wall.end)
+  })
+
+  // Pour trouver les zones (cycles minimaux), on peut utiliser une approche par faces
+  // Mais ici, on va simplifier : on cherche les cycles fermés.
+  // Un algorithme plus robuste serait nécessaire pour des cas complexes, 
+  // mais pour un plan 2D, on cherche les cycles qui ne contiennent pas d'autres cycles.
+  
+  const foundZones: Point[][] = []
+  const visitedEdges = new Set<string>()
+
+  // Pour chaque point et chaque voisin, on essaie de former une face en prenant toujours le tournant le plus à "gauche" (ou droite)
+  for (const [startKey, neighbors] of adj.entries()) {
+    for (const nextKey of neighbors) {
+      const edgeKey = `${startKey}->${nextKey}`
+      if (visitedEdges.has(edgeKey)) continue
+
+      const path: string[] = [startKey, nextKey]
+      let current = nextKey
+      let prev = startKey
+
+      while (true) {
+        const currentNeighbors = Array.from(adj.get(current)!)
+        if (currentNeighbors.length < 2) break // Cul-de-sac
+
+        // Calculer les angles pour trouver le voisin le plus à gauche
+        const pPrev = pointsMap.get(prev)!
+        const pCurr = pointsMap.get(current)!
+        const angleIn = Math.atan2(pPrev.y - pCurr.y, pPrev.x - pCurr.x)
+
+        let bestNext: string | null = null
+        let minAngle = Infinity
+
+        for (const neighbor of currentNeighbors) {
+          if (neighbor === prev) continue
+          const pNext = pointsMap.get(neighbor)!
+          let angleOut = Math.atan2(pNext.y - pCurr.y, pNext.x - pCurr.x)
+          
+          let diff = angleOut - angleIn
+          while (diff <= 0) diff += 2 * Math.PI
+          while (diff > 2 * Math.PI) diff -= 2 * Math.PI
+
+          if (diff < minAngle) {
+            minAngle = diff
+            bestNext = neighbor
+          }
+        }
+
+        if (bestNext) {
+          if (bestNext === path[0]) {
+            // Cycle trouvé !
+            const cycleKeys = [...path]
+            // Marquer les arêtes comme visitées
+            for (let i = 0; i < cycleKeys.length; i++) {
+              const kA = cycleKeys[i]
+              const kB = cycleKeys[(i + 1) % cycleKeys.length]
+              visitedEdges.add(`${kA}->${kB}`)
+            }
+            foundZones.push(cycleKeys.map(k => pointsMap.get(k)!))
+            break
+          } else if (path.includes(bestNext)) {
+            // On a recroisé le chemin mais pas au début, pas une face simple
+            break
+          } else {
+            path.push(bestNext)
+            prev = current
+            current = bestNext
+          }
+        } else {
+          break
+        }
+      }
+    }
+  }
+
+  // Filtrer les zones : on veut seulement celles qui ont une aire positive (sens trigonométrique ou horaire constant)
+  // et on veut éviter la "zone infinie" extérieure.
+  // L'aire signée d'un polygone : 0.5 * sum(xi*yi+1 - xi+1*yi)
+  const calculateArea = (pts: Point[]) => {
+    let area = 0
+    for (let i = 0; i < pts.length; i++) {
+      const p1 = pts[i]!
+      const p2 = pts[(i + 1) % pts.length]!
+      area += (p1.x * p2.y - p2.x * p1.y)
+    }
+    return area / 2
+  }
+
+  return foundZones
+    .filter(pts => calculateArea(pts) > 0) // Garder seulement un sens de rotation (ex: anti-horaire) pour exclure la face extérieure
+    .map(pts => ({
+      id: crypto.randomUUID(),
+      points: pts
+    }))
+})
 
 const wallsPathData = computed(() => {
   if (walls.value.length === 0) return ''
@@ -166,6 +287,11 @@ const onWheel = (event: WheelEvent) => {
 
 const onKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Escape' && isDrawingMode.value) {
+    // Si on a déjà tracé au moins un mur (c-à-d firstPoint est différent de initialPoint)
+    // l'utilisateur veut peut-être arrêter le tracé ici.
+    // Mais dans notre logique actuelle, chaque clic ajoute un mur immédiatement.
+    // Donc si on a firstPoint, c'est qu'on est en train d'attendre le point SUIVANT d'un mur.
+    // Appuyer sur Echap arrête simplement le tracé continu.
     firstPoint.value = null
     initialPoint.value = null
     mousePos.value = null
@@ -194,9 +320,112 @@ onUnmounted(() => {
 
 const SNAP_TOLERANCE = 1.0 // Unité SVG (environ 1m dans la config actuelle)
 
+const getSnapPoint = (point: Point): Point => {
+  let bestPoint = { ...point }
+  let minDistance = SNAP_TOLERANCE
+
+  // 1. Essayer de snapper sur les extrémités des murs existants
+  walls.value.forEach(wall => {
+    const d1 = Math.sqrt(Math.pow(point.x - wall.start.x, 2) + Math.pow(point.y - wall.start.y, 2))
+    const d2 = Math.sqrt(Math.pow(point.x - wall.end.x, 2) + Math.pow(point.y - wall.end.y, 2))
+    
+    if (d1 < minDistance) {
+      minDistance = d1
+      bestPoint = { ...wall.start }
+    }
+    if (d2 < minDistance) {
+      minDistance = d2
+      bestPoint = { ...wall.end }
+    }
+  })
+
+  // 2. Si on n'a pas trouvé d'extrémité, essayer de snapper sur le corps d'un mur
+  if (minDistance >= SNAP_TOLERANCE) {
+    walls.value.forEach(wall => {
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const l2 = dx * dx + dy * dy
+      if (l2 === 0) return
+
+      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / l2
+      t = Math.max(0, Math.min(1, t))
+      
+      const px = wall.start.x + t * dx
+      const py = wall.start.y + t * dy
+      const d = Math.sqrt(Math.pow(point.x - px, 2) + Math.pow(point.y - py, 2))
+
+      if (d < minDistance) {
+        minDistance = d
+        bestPoint = { x: px, y: py }
+      }
+    })
+  }
+
+  return bestPoint
+}
+
+const splitWallAtPoint = (point: Point) => {
+  const threshold = 0.1 // Très petite tolérance pour l'égalité des points
+  
+  for (let i = 0; i < walls.value.length; i++) {
+    const wall = walls.value[i]!
+    
+    // Vérifier si le point est déjà une extrémité
+    const distStart = Math.sqrt(Math.pow(point.x - wall.start.x, 2) + Math.pow(point.y - wall.start.y, 2))
+    const distEnd = Math.sqrt(Math.pow(point.x - wall.end.x, 2) + Math.pow(point.y - wall.end.y, 2))
+    
+    if (distStart < threshold || distEnd < threshold) continue
+
+    // Vérifier si le point est sur le segment
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const l2 = dx * dx + dy * dy
+    if (l2 === 0) continue
+
+    let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / l2
+    
+    // Si le point est sur le mur (avec une petite tolérance t entre 0 et 1)
+    if (t > 0.01 && t < 0.99) {
+      const px = wall.start.x + t * dx
+      const py = wall.start.y + t * dy
+      const dist = Math.sqrt(Math.pow(point.x - px, 2) + Math.pow(point.y - py, 2))
+      
+      if (dist < threshold) {
+        // On divise le mur en deux
+        const originalEnd = { ...wall.end }
+        const originalOpenings = [...wall.openings]
+        
+        // Mur 1 : de start à point
+        wall.end = { ...point }
+        // On ne garde que les ouvertures qui sont sur la première partie (position <= t)
+        wall.openings = originalOpenings.filter(o => o.position <= t).map(o => ({
+          ...o,
+          position: o.position / t
+        }))
+
+        // Mur 2 : de point à originalEnd
+        walls.value.push({
+          id: crypto.randomUUID(),
+          start: { ...point },
+          end: originalEnd,
+          openings: originalOpenings.filter(o => o.position > t).map(o => ({
+            ...o,
+            position: (o.position - t) / (1 - t)
+          }))
+        })
+        
+        // On a modifié la liste, on pourrait continuer mais un point ne devrait 
+        // couper qu'un mur à la fois (ou être une intersection existante)
+        break
+      }
+    }
+  }
+}
+
 const onMouseDown = (event: MouseEvent) => {
   if (isDrawingMode.value) {
-    let point = getSvgPoint(event)
+    let rawPoint = getSvgPoint(event)
+    let point = getSnapPoint(rawPoint)
     
     // Vérouillage directionnel (orthogonal) si Ctrl est enfoncé
     if (event.ctrlKey && firstPoint.value) {
@@ -209,40 +438,42 @@ const onMouseDown = (event: MouseEvent) => {
       }
     }
     
-    // Si on a un point initial et qu'on clique sur le point de départ (avec snapping)
-    if (initialPoint.value && firstPoint.value) {
-      const dist = Math.sqrt(Math.pow(point.x - initialPoint.value.x, 2) + Math.pow(point.y - initialPoint.value.y, 2))
-      if (dist < SNAP_TOLERANCE) { 
-        // On ferme le tracé avec un mur vers le point initial exact pour une fermeture propre
-        walls.value.push({
-          id: crypto.randomUUID(),
-          start: firstPoint.value,
-          end: { ...initialPoint.value },
-          openings: []
-        })
-        firstPoint.value = null
-        initialPoint.value = null
-        mousePos.value = null
-        return
-      }
-    }
-
     if (!firstPoint.value) {
-      const point = getSvgPoint(event)
+      // Premier point du tracé
+      splitWallAtPoint(point)
       firstPoint.value = point
       initialPoint.value = point
       mousePos.value = point
     } else {
-      const point = getSvgPoint(event)
+      // Points suivants
+      // Vérifier si on clique sur le point initial pour fermer la boucle
+      const distToInitial = Math.sqrt(Math.pow(point.x - initialPoint.value!.x, 2) + Math.pow(point.y - initialPoint.value!.y, 2))
+      
+      if (distToInitial < SNAP_TOLERANCE) {
+        // On ferme le tracé exact sur le point initial
+        point = { ...initialPoint.value! }
+      }
+
+      // Avant d'ajouter le mur, on vérifie si le point de destination coupe un mur existant
+      splitWallAtPoint(point)
+
       walls.value.push({
         id: crypto.randomUUID(),
-        start: firstPoint.value,
-        end: point,
+        start: { ...firstPoint.value },
+        end: { ...point },
         openings: []
       })
-      // Au lieu de mettre firstPoint à null, on le met au point actuel pour continuer
-      firstPoint.value = point
-      mousePos.value = point
+
+      if (distToInitial < SNAP_TOLERANCE) {
+        // Tracé fermé
+        firstPoint.value = null
+        initialPoint.value = null
+        mousePos.value = null
+      } else {
+        // On continue le tracé
+        firstPoint.value = point
+        mousePos.value = point
+      }
     }
     return
   }
@@ -274,7 +505,7 @@ const onMouseDown = (event: MouseEvent) => {
     })
 
     if (closestWallIndex !== null && minDistance < threshold) {
-      const wall = walls.value[closestWallIndex]
+      const wall = walls.value[closestWallIndex]!
       const dx = wall.end.x - wall.start.x
       const dy = wall.end.y - wall.start.y
       const l2 = dx * dx + dy * dy
@@ -291,7 +522,7 @@ const onMouseDown = (event: MouseEvent) => {
           finalT = Math.max(0, Math.min(1 - (width / wallLength), t))
       }
 
-      wall.openings.push({
+      wall!.openings.push({
         id: crypto.randomUUID(),
         type: isWindow ? 'window' : 'door',
         variant: (isDoubleDoorMode.value || isDoubleWindowMode.value) ? 'double' : (isBayWindowMode.value ? 'bay' : 'simple'),
@@ -390,7 +621,7 @@ const onMouseMove = (event: MouseEvent) => {
     for (const wall of walls.value) {
       const openingIndex = wall.openings.findIndex(o => o.id === selectedOpeningId.value)
       if (openingIndex !== -1) {
-        const opening = wall.openings[openingIndex]
+        const opening = wall.openings[openingIndex]!
         const dx = wall.end.x - wall.start.x
         const dy = wall.end.y - wall.start.y
         const wallLength = Math.sqrt(dx * dx + dy * dy)
@@ -422,7 +653,8 @@ const onMouseMove = (event: MouseEvent) => {
   }
 
   if (isDrawingMode.value && firstPoint.value) {
-    let point = getSvgPoint(event)
+    let rawPoint = getSvgPoint(event)
+    let point = getSnapPoint(rawPoint)
     
     // Vérouillage directionnel (orthogonal) si Ctrl est enfoncé
     if (event.ctrlKey) {
@@ -485,7 +717,7 @@ const onTouchMove = (event: TouchEvent) => {
     for (const wall of walls.value) {
       const openingIndex = wall.openings.findIndex(o => o.id === selectedOpeningId.value)
       if (openingIndex !== -1) {
-        const opening = wall.openings[openingIndex]
+        const opening = wall.openings[openingIndex]!
         const dx = wall.end.x - wall.start.x
         const dy = wall.end.y - wall.start.y
         const wallLength = Math.sqrt(dx * dx + dy * dy)
@@ -714,18 +946,28 @@ const selectedWallMeasurementLines = computed(() => {
       >
         <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#grid)" />
 
+        <!-- Zones -->
+        <polygon
+          v-for="zone in zones"
+          :key="zone.id"
+          :points="zone.points.map(p => `${p.x},${p.y}`).join(' ')"
+          fill="yellow"
+          fill-opacity="0.5"
+          stroke="none"
+        />
+
         <!-- Murs fixés -->
-        <g v-for="wall in walls" :key="wall.id">
-          <line
-            :x1="wall.start.x"
-            :y1="wall.start.y"
-            :x2="wall.end.x"
-            :y2="wall.end.y"
-            stroke="black"
-            stroke-width="5"
-            stroke-linecap="round"
-          />
-          <!-- Portes -->
+        <path
+          v-if="wallsPathData"
+          :d="wallsPathData"
+          stroke="black"
+          stroke-width="5"
+          stroke-linecap="round"
+          fill="none"
+        />
+
+        <!-- Ouvertures (portes et fenêtres) -->
+        <g v-for="wall in walls" :key="'openings-' + wall.id">
           <g v-for="opening in wall.openings" :key="opening.id">
             <g v-if="opening.type === 'door'" :transform="getOpeningTransform(wall, opening)">
               <!-- L'ouverture dans le mur -->
