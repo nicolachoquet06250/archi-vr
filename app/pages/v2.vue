@@ -6,10 +6,12 @@ import Toolbar from "~/components/V2/Toolbar.vue";
 import DrawingZone from "~/components/V2/DrawingZone.vue";
 import Loader from "~/components/V2/Loader.vue";
 
+import {WallIcon, DoorIcon, DoorDoubleIcon, WindowIcon, WindowDoubleIcon, WindowBayIcon, StairIcon, StairCornerIcon, StairSpiralIcon, StairPlatformIcon, RoofIcon, FurnitureIcon, ChevronIcon} from "~/components/V2/icons";
+
 const $styles = useCssModule();
 
 const {showCompass} = useCompass()
-const {toolbarSide} = useToolbar()
+const {toolbarSide, selectTool, selectedTool} = useToolbar()
 
 const mainZone = ref<HTMLElement | null>(null)
 const menuZoneRef = ref<HTMLElement | null>(null)
@@ -18,6 +20,9 @@ const mainZoneWidth = ref(0)
 const isCompact = computed(() => mainZoneWidth.value < 1100) // 700 (buildZone) + 200 (menu) + 200 (properties)
 const isMenuOpen = ref(false)
 const isPropertiesOpen = ref(false)
+const isDoorsMenuOpen = ref(false)
+const isWindowsMenuOpen = ref(false)
+const isStairsMenuOpen = ref(false)
 
 const handleClickOutside = (event: MouseEvent) => {
   if (!isCompact.value) return
@@ -29,6 +34,42 @@ const handleClickOutside = (event: MouseEvent) => {
   }
   if (isPropertiesOpen.value && propertiesZoneRef.value && !propertiesZoneRef.value.contains(target)) {
     isPropertiesOpen.value = false
+  }
+}
+const handleDoorsSelect = () => {
+  if (isCompact.value && !isMenuOpen.value) {
+    isMenuOpen.value = true;
+    isDoorsMenuOpen.value = true;
+  } else {
+    isDoorsMenuOpen.value = !isDoorsMenuOpen;
+  }
+  if (isDoorsMenuOpen.value) {
+    isWindowsMenuOpen.value = false;
+    isStairsMenuOpen.value = false;
+  }
+}
+const handleWindowsSelect = () => {
+  if (isCompact.value && !isMenuOpen.value) {
+    isMenuOpen.value = true;
+    isWindowsMenuOpen.value = true;
+  } else {
+    isWindowsMenuOpen.value = !isWindowsMenuOpen.value;
+  }
+  if (isWindowsMenuOpen.value) {
+    isDoorsMenuOpen.value = false;
+    isStairsMenuOpen.value = false;
+  }
+}
+const handleStairsSelect = () => {
+  if (isCompact.value && !isMenuOpen.value) {
+    isMenuOpen.value = true;
+    isStairsMenuOpen.value = true;
+  } else {
+    isStairsMenuOpen.value = !isStairsMenuOpen.value;
+  }
+  if (isStairsMenuOpen.value) {
+    isDoorsMenuOpen.value = false;
+    isWindowsMenuOpen.value = false;
   }
 }
 
@@ -53,7 +94,14 @@ useSeoMeta({
   twitterDescription: `création d'une application d'architecture complète avec la spécificité qu'elle intègre une vue 3D ET une vue VR destiné aux client pour la visite immersive du batiment`,
 })
 
-let observer: ResizeObserver | null = null
+let observer: ResizeObserver | null = null;
+
+const isActive = (tool: ToolbarSelectedTool) => ({
+  [$styles.active]: selectedTool.value === tool
+})
+const isPossibleActive = (tools: ToolbarSelectedTool[]) => ({
+  [$styles.active]: tools.includes(selectedTool.value)
+})
 
 onMounted(() => {
   window.addEventListener('mousedown', handleClickOutside)
@@ -92,11 +140,170 @@ onUnmounted(() => {
     <aside ref="menuZoneRef" :class="[$style.menuZone, { [$style.open]: isMenuOpen }]">
       <nav :class="$style.title" @click="isMenuOpen = !isMenuOpen">
         <span v-show="!isCompact || isMenuOpen">Architecture</span>
-        <span v-if="isCompact" :class="$style.toggleIcon">{{ isMenuOpen ? '❮' : '❯' }}</span>
+        <span v-if="isCompact" :class="$style.toggleIcon">
+          <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: isMenuOpen }]" />
+        </span>
       </nav>
 
-      <div v-show="!isCompact || isMenuOpen" :class="$style.content">
-        <!-- Contenu du menu ici -->
+      <div :class="$style.content">
+        <ul :class="$style.menuList">
+          <li
+              :class="[$style.menuItem, isActive('wall')]"
+              @click="selectTool('wall')"
+          >
+            <WallIcon :size="20" />
+            <span v-show="!isCompact || isMenuOpen">Walls</span>
+          </li>
+
+          <li
+              :class="[
+                  $style.menuItem,
+                  $style.expandable,
+                  isPossibleActive([
+                      'door', 'door-simple',
+                      'door-double'
+                  ]),
+                  { [$style.expanded]: isDoorsMenuOpen }
+              ]"
+              @click="handleDoorsSelect"
+          >
+            <div :class="$style.menuItemMain">
+              <DoorIcon :size="22" />
+              <span v-show="!isCompact || isMenuOpen">Doors</span>
+              <ChevronIcon
+                  v-show="!isCompact || isMenuOpen"
+                  :size="12"
+                  :class="[$style.chevron, { [$style.expanded]: isDoorsMenuOpen }]"
+              />
+            </div>
+
+            <Transition name="expand">
+              <ul v-show="isDoorsMenuOpen && (!isCompact || isMenuOpen)" :class="$style.subMenu" @click.stop>
+                <li :class="[$style.subMenuItem, isActive('door-simple')]" @click="selectTool('door-simple')">
+                  <DoorIcon :size="18" />
+                  <span>Simple doors</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('door-double')]" @click="selectTool('door-double')">
+                  <DoorDoubleIcon :size="18" />
+                  <span>Double doors</span>
+                </li>
+              </ul>
+            </Transition>
+          </li>
+
+          <li
+              :class="[
+                  $style.menuItem,
+                  $style.expandable,
+                  isPossibleActive([
+                      'window', 'window-simple',
+                      'window-double', 'window-bay'
+                  ]),
+                  { [$style.expanded]: isWindowsMenuOpen }
+              ]"
+              @click="handleWindowsSelect"
+          >
+            <div :class="$style.menuItemMain">
+              <WindowIcon :size="22" />
+              <span v-show="!isCompact || isMenuOpen">Windows</span>
+              <ChevronIcon
+                  v-show="!isCompact || isMenuOpen"
+                  :size="12"
+                  :class="[$style.chevron, { [$style.expanded]: isWindowsMenuOpen }]"
+              />
+            </div>
+
+            <Transition name="expand">
+              <ul v-show="isWindowsMenuOpen && (!isCompact || isMenuOpen)" :class="$style.subMenu" @click.stop>
+                <li :class="[$style.subMenuItem, isActive('window-simple')]" @click="selectTool('window-simple')">
+                  <WindowIcon :size="18" />
+                  <span>Simple window</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('window-double')]" @click="selectTool('window-double')">
+                  <WindowDoubleIcon :size="18" />
+                  <span>Double window</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('window-bay')]" @click="selectTool('window-bay')">
+                  <WindowBayIcon :size="18" />
+                  <span>Bay window</span>
+                </li>
+              </ul>
+            </Transition>
+          </li>
+
+          <li
+              :class="[
+                  $style.menuItem,
+                  $style.expandable,
+                  isPossibleActive([
+                      'stair', 'stair-straight',
+                      'stair-corner', 'stair-spiral',
+                      'stair-platform'
+                  ]),
+                  { [$style.expanded]: isStairsMenuOpen }
+              ]"
+              @click="handleStairsSelect"
+          >
+            <div :class="$style.menuItemMain">
+              <StairIcon :size="22" />
+              <span v-show="!isCompact || isMenuOpen">Stairs</span>
+              <ChevronIcon
+                  v-show="!isCompact || isMenuOpen"
+                  :size="12"
+                  :class="[$style.chevron, { [$style.expanded]: isStairsMenuOpen }]"
+              />
+            </div>
+
+            <Transition name="expand">
+              <ul v-show="isStairsMenuOpen && (!isCompact || isMenuOpen)" :class="$style.subMenu" @click.stop>
+                <li :class="[$style.subMenuItem, isActive('stair-straight')]" @click="selectTool('stair-straight')">
+                  <StairIcon :size="18" />
+                  <span>Straight staircases</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('stair-corner')]" @click="selectTool('stair-corner')">
+                  <StairCornerIcon :size="18" />
+                  <span>Corner stairs</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('stair-spiral')]" @click="selectTool('stair-spiral')">
+                  <StairSpiralIcon :size="18" />
+                  <span>Spiral staircases</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('stair-platform')]" @click="selectTool('stair-platform')">
+                  <StairPlatformIcon :size="18" />
+                  <span>Stairs with platforms</span>
+                </li>
+              </ul>
+            </Transition>
+          </li>
+
+          <li
+              :class="[
+                  $style.menuItem,
+                  isActive('roof')
+              ]"
+              @click="selectTool('roof')"
+          >
+            <RoofIcon :size="20" />
+            <span v-show="!isCompact || isMenuOpen">Roofs</span>
+          </li>
+
+          <li
+              :class="[
+                  $style.menuItem,
+                  isActive('furniture')
+              ]"
+              @click="selectTool('furniture')"
+          >
+            <FurnitureIcon :size="20" />
+            <span v-show="!isCompact || isMenuOpen">Furnitures</span>
+          </li>
+        </ul>
       </div>
     </aside>
 
@@ -116,11 +323,13 @@ onUnmounted(() => {
 
     <aside ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
       <nav :class="$style.title" @click="isPropertiesOpen = !isPropertiesOpen">
-        <span v-if="isCompact" :class="$style.toggleIcon">{{ isPropertiesOpen ? '❯' : '❮' }}</span>
+        <span v-if="isCompact" :class="$style.toggleIcon">
+          <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: !isPropertiesOpen }]" />
+        </span>
         <span v-show="!isCompact || isPropertiesOpen">Properties</span>
       </nav>
 
-      <div v-show="!isCompact || isPropertiesOpen" :class="$style.content">
+      <div :class="$style.content">
         <!-- Contenu des propriétés ici -->
       </div>
     </aside>
@@ -128,6 +337,19 @@ onUnmounted(() => {
 </template>
 
 <style>
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.3s ease-in-out;
+  max-height: 100px;
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
 #__nuxt {
   height: 100vh;
 }
@@ -153,6 +375,7 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     z-index: 1000;
+    overflow-x: hidden;
   }
 
   .propertiesZone {
@@ -162,6 +385,7 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     z-index: 1000;
+    overflow-x: hidden;
   }
 
   .menuZone .title,
@@ -191,7 +415,6 @@ onUnmounted(() => {
       left: 0;
       height: 100%;
       width: 30px;
-      overflow: hidden;
       z-index: 1001;
 
       &.open {
@@ -211,7 +434,6 @@ onUnmounted(() => {
       right: 0;
       height: 100%;
       width: 30px;
-      overflow: hidden;
       z-index: 1001;
 
       &.open {
@@ -249,6 +471,113 @@ onUnmounted(() => {
 .content {
   flex: 1;
   overflow-y: auto;
+}
+
+.menuList {
+  list-style: none;
+  padding: 10px 0;
+  margin: 0;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 15px;
+  color: #cfd1d2;
+  cursor: pointer;
+  transition: background-color 0.2s, padding 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
+
+  .mainZone.compact .menuZone:not(.open) & {
+    padding: 10px 5px;
+    justify-content: center;
+    gap: 0;
+  }
+
+  &:hover {
+    background-color: #3a3f42;
+  }
+
+  &.active {
+    background-color: #3a80b6;
+    color: #ffffff;
+  }
+
+  span {
+    font-size: 14px;
+  }
+}
+
+.expandable {
+  display: block;
+  padding: 0;
+
+  .menuItemMain {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    width: 100%;
+    box-sizing: border-box;
+    transition: padding 0.3s ease;
+
+    .mainZone.compact .menuZone:not(.open) & {
+      padding: 0;
+      justify-content: center;
+      gap: 0;
+    }
+  }
+
+  &.active .menuItemMain {
+    background-color: #3a80b6;
+    color: #ffffff;
+  }
+
+  &:not(.active) .menuItemMain:hover {
+    background-color: #3a3f42;
+  }
+}
+
+.chevron {
+  margin-left: auto;
+  transition: transform 0.3s ease;
+
+  &.expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.subMenu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  background-color: #222222;
+}
+
+.subMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 15px 8px 35px;
+  color: #cfd1d2;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background-color: #3a3f42;
+  }
+
+  &.active {
+    background-color: #4a4f52;
+    color: #ffffff;
+  }
+
+  span {
+    font-size: 13px;
+  }
 }
 
 .toolbar {

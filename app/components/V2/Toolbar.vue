@@ -5,7 +5,6 @@ import {
   MultipleSelectIcon, EditIcon,
   MeasureIcon, PaintIcon,
   ZoomInIcon, ZoomOutIcon,
-  RoofIcon, FurnitureIcon,
   LayerIcon, SettingsIcon,
   DeletionIcon, MoreIcon,
 } from '~/components/V2/icons';
@@ -32,11 +31,11 @@ const setGroupRef = (el: any) => {
   }
 };
 
-const visibleGroupsCount = ref(6);
+const visibleGroupsCount = ref(5);
 const isDropdownOpen = ref(false);
 
 const resetAndMeasure = () => {
-  visibleGroupsCount.value = 6;
+  visibleGroupsCount.value = 5;
   groupRefs.value = [];
   nextTick(() => {
     updateVisibleGroups();
@@ -51,7 +50,7 @@ const closeDropdown = (e: MouseEvent) => {
 
 const updateVisibleGroups = () => {
   if (!props.vertical || !containerRef.value) {
-    visibleGroupsCount.value = 6;
+    visibleGroupsCount.value = 5;
     return;
   }
 
@@ -89,7 +88,7 @@ const updateVisibleGroups = () => {
   let totalHeight = 0;
   sortedGroups.forEach(g => { if(g) totalHeight += g.offsetHeight + 2; });
   if (totalHeight <= parentHeight) {
-    visibleGroupsCount.value = 6;
+    visibleGroupsCount.value = 5;
   } else {
     visibleGroupsCount.value = count;
   }
@@ -186,20 +185,6 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
 
   <ul v-show="visibleGroupsCount >= 4" :ref="setGroupRef">
     <li>
-      <button :class="isActive('roof')" @click="selectTool('roof')">
-        <RoofIcon :size="20" />
-      </button>
-    </li>
-
-    <li>
-      <button :class="isActive('furniture')" @click="selectTool('furniture')">
-        <FurnitureIcon :size="20" />
-      </button>
-    </li>
-  </ul>
-
-  <ul v-show="visibleGroupsCount >= 5" :ref="setGroupRef">
-    <li>
       <button :class="isActive('layer')" @click="selectTool('layer')">
         <LayerIcon :size="20" />
       </button>
@@ -212,7 +197,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
     </li>
   </ul>
 
-  <ul v-show="visibleGroupsCount >= 6" :ref="setGroupRef">
+  <ul v-show="visibleGroupsCount >= 5" :ref="setGroupRef">
     <li>
       <button :class="isActive('deletion')" @click="selectTool('deletion')">
         <DeletionIcon :size="20" />
@@ -220,7 +205,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
     </li>
   </ul>
 
-  <ul v-if="vertical && visibleGroupsCount < 6">
+  <ul v-if="vertical && visibleGroupsCount < 5">
     <li :class="$style.dropdown">
       <button @click="isDropdownOpen = !isDropdownOpen">
         <MoreIcon :size="20" />
@@ -261,15 +246,6 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
         </div>
 
         <div v-if="visibleGroupsCount < 4">
-          <button :class="isActive('roof')" @click="selectTool('roof')">
-            <RoofIcon :size="20" />
-          </button>
-          <button :class="isActive('furniture')" @click="selectTool('furniture')">
-            <FurnitureIcon :size="20" />
-          </button>
-        </div>
-
-        <div v-if="visibleGroupsCount < 5">
           <button :class="isActive('layer')" @click="selectTool('layer')">
             <LayerIcon :size="20" />
           </button>
@@ -278,7 +254,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
           </button>
         </div>
 
-        <div v-if="visibleGroupsCount < 6">
+        <div v-if="visibleGroupsCount < 5">
           <button :class="isActive('deletion')" @click="selectTool('deletion')">
             <DeletionIcon :size="20" />
           </button>

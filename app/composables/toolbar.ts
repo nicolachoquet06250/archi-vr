@@ -4,7 +4,7 @@ export type ToolbarSelectedTool =
     'selection' | 'move' |
     'multiple-selection' | 'edit' |
     'measure' | 'paint' |
-    'roof' | 'furniture' |
+    'roof' | 'furniture' | 'wall' | 'door' | 'door-simple' | 'door-double' | 'window' | 'window-simple' | 'window-double' | 'window-bay' | 'stair' | 'stair-straight' | 'stair-corner' | 'stair-spiral' | 'stair-platform' |
     'layer' | 'settings' |
     'deletion';
 
