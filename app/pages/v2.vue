@@ -161,7 +161,7 @@ onUnmounted(() => {
   background-color: #2b2e31;
   display: flex;
   flex-direction: column;
-  z-index: 3;
+  z-index: 1000;
 }
 
 .mainZone.compact .menuZone {
@@ -171,12 +171,12 @@ onUnmounted(() => {
   height: 100%;
   width: 30px;
   overflow: hidden;
-  z-index: 2;
+  z-index: 1001;
 }
 
 .mainZone.compact .menuZone.open {
   width: 200px;
-  z-index: 100;
+  z-index: 1002;
 }
 
 .buildZone {
@@ -199,7 +199,7 @@ onUnmounted(() => {
   background-color: #2b2e31;
   display: flex;
   flex-direction: column;
-  z-index: 3;
+  z-index: 1000;
 }
 
 .mainZone.compact .propertiesZone {
@@ -209,12 +209,12 @@ onUnmounted(() => {
   height: 100%;
   width: 30px;
   overflow: hidden;
-  z-index: 2;
+  z-index: 1001;
 }
 
 .mainZone.compact .propertiesZone.open {
   width: 200px;
-  z-index: 100;
+  z-index: 1002;
 }
 
 .compass {

@@ -16,7 +16,7 @@ import ModeToggler from "~/components/V2/ModeToggler.vue";
 <style module>
 nav {
   position: relative;
-  z-index: 3;
+  z-index: 2000;
 }
 
 .modeToggler {

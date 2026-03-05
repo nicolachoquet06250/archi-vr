@@ -292,7 +292,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
 <style module>
 .nav {
   position: relative;
-  z-index: 2;
+  z-index: 1000;
 
   * {
     color: #ffffff;
@@ -382,7 +382,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
     flex-direction: row;
     gap: 10px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-    z-index: 10;
+    z-index: 1001;
 
     &.rightSide {
       left: auto;
