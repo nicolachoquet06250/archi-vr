@@ -14,6 +14,12 @@ const zoomInTrigger = ref(0);
 const zoomOutTrigger = ref(0);
 const zoom = ref(1);
 
+/**
+ * Ratio de l'échelle : 1 mètre correspond à une unité de grille secondaire (10 unités SVG).
+ */
+export const GRID_SECONDARY_UNIT_SIZE = 10;
+export const METERS_PER_GRID_UNIT = 1;
+
 export const useToolbar = () => ({
     toolbarSide: computed(() => toolbarSide.value),
     selectedTool: computed(() => selectedToolbarTool.value),
