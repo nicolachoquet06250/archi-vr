@@ -72,13 +72,17 @@ onUnmounted(() => {
   --accent-blue: #3498db;
   --text-color: #ffffff;
 
-  /* Permet d'utiliser 'em' à l'intérieur du composant */
-  font-size: 16px;
+  /* Permet d'utiliser les unités de container query à l'intérieur du composant */
+  container-type: size;
   display: flex;
   justify-content: center;
   align-items: center;
   position: relative;
   z-index: 1;
+
+  * {
+    user-select: none;
+  }
 }
 
 .compassContainer {
@@ -94,9 +98,21 @@ onUnmounted(() => {
   background-color: var(--bg-color);
   border-radius: 50%;
   /* Bordure relative à la taille */
-  border: 0.04em solid #1a1a1a;
-  box-shadow: inset 0 0 1em rgba(0,0,0,0.5), 0 0.3em 1em rgba(0,0,0,0.3);
+  border: 0.3cqi solid #1a1a1a;
+  box-shadow: inset 0 0 10cqi rgba(0,0,0,0.5), 0 3cqi 10cqi rgba(0,0,0,0.3);
   box-sizing: border-box; /* Crucial pour les calculs de taille */
+
+  &:after {
+    content: '';
+    position: absolute;
+    top: 4%;
+    left: 4%;
+    width: 90%;
+    height: 90%;
+    border-radius: 6000px;
+    pointer-events: none;
+    border: 1px solid #666c6c;
+  }
 }
 
 .point {
@@ -105,7 +121,7 @@ onUnmounted(() => {
   font-family: Arial, sans-serif;
   font-weight: bold;
   /* Taille du texte proportionnelle */
-  font-size: calc(1em * 1.2);
+  font-size: 8cqi;
 }
 
 /* Positionnement proportionnel */
@@ -130,20 +146,21 @@ onUnmounted(() => {
   position: absolute;
   width: 0;
   height: 0;
-  border-left: 0.5em solid transparent; /* Moitié de la largeur de l'aiguille */
-  border-right: 0.5em solid transparent;
+  left: 50%;
+  right: 0;
+  border-left: 2.5cqi solid transparent;
+  border-right: 2.5cqi solid transparent;
+  translate: -50% 0;
 }
 
 .north {
-  top: 0;
-  border-bottom: 2.5em solid var(--accent-red); /* Longueur proportionnelle */
-  translate: 0 50%;
+  bottom: 50%;
+  border-bottom: 35cqi solid var(--accent-red);
 }
 
 .south {
-  bottom: 0;
-  border-top: 2.5em solid var(--accent-blue);
-  translate: 0 -50%;
+  top: 50%;
+  border-top: 35cqi solid var(--accent-blue);
 }
 
 .pivot {
@@ -151,10 +168,10 @@ onUnmounted(() => {
   top: 50%;
   left: 50%;
   /* Taille du pivot proportionnelle */
-  width: 0.8em;
-  height: 0.8em;
+  width: 5cqi;
+  height: 5cqi;
   background: #000;
-  border: 0.15em solid #555;
+  border: 1cqi solid #555;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 10;

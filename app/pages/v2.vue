@@ -104,6 +104,7 @@ onUnmounted(() => {
         <span v-show="!isCompact || isMenuOpen">Architecture</span>
         <span v-if="isCompact" :class="$style.toggleIcon">{{ isMenuOpen ? '❮' : '❯' }}</span>
       </nav>
+
       <div v-show="!isCompact || isMenuOpen" :class="$style.content">
         <!-- Contenu du menu ici -->
       </div>
@@ -120,7 +121,7 @@ onUnmounted(() => {
           :side="toolbarSide"
       />
 
-      <Compass v-show="showCompass" size="140px" :class="$style.compass" />
+      <Compass v-show="showCompass" size="100px" :class="$style.compass" />
     </section>
 
     <aside ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
@@ -128,6 +129,7 @@ onUnmounted(() => {
         <span v-if="isCompact" :class="$style.toggleIcon">{{ isPropertiesOpen ? '❯' : '❮' }}</span>
         <span v-show="!isCompact || isPropertiesOpen">Properties</span>
       </nav>
+
       <div v-show="!isCompact || isPropertiesOpen" :class="$style.content">
         <!-- Contenu des propriétés ici -->
       </div>
@@ -219,8 +221,8 @@ onUnmounted(() => {
 
 .compass {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
+  bottom: 5px;
+  left: 5px;
 }
 
 .menuZone .title,
