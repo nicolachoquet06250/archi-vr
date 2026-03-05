@@ -198,6 +198,7 @@ const {change: changeToolbarSide} = useToolbar()
     padding: 0;
     position: relative;
 
+
     &:hover > button + ul {
       display: flex;
     }
@@ -210,13 +211,16 @@ const {change: changeToolbarSide} = useToolbar()
       border-radius: 0 0 5px 0;
     }
 
-    /*&:last-of-type > button + ul {
-      border-radius: 0 0 0 5px;
-    }*/
-
     &:nth-last-of-type(-n+2) > button + ul {
       left: auto;
       right: 0;
+    }
+
+    @media screen and (min-width: 420px) {
+      &:nth-last-of-type(-n+2) > button + ul {
+        left: -1px;
+        right: unset;
+      }
     }
 
     > button {

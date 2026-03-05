@@ -11,18 +11,15 @@ import {WallIcon, DoorIcon, DoorDoubleIcon, WindowIcon, WindowDoubleIcon, Window
 const $styles = useCssModule();
 
 const {showCompass} = useCompass()
-const {toolbarSide, selectTool, selectedTool} = useToolbar()
+const {toolbarSide} = useToolbar()
+const { isMenuOpen, isPropertiesOpen, toggleMenu, toggleProperties, closeAll: closeSidebar } = useSidebar()
+const { isDoorsMenuOpen, isWindowsMenuOpen, isStairsMenuOpen, handleDoorsSelect, handleWindowsSelect, handleStairsSelect, closeAllSubMenus, selectedTool, selectTool } = useToolbarMenu()
 
 const mainZone = ref<HTMLElement | null>(null)
 const menuZoneRef = ref<HTMLElement | null>(null)
 const propertiesZoneRef = ref<HTMLElement | null>(null)
 const mainZoneWidth = ref(0)
 const isCompact = computed(() => mainZoneWidth.value < 1100) // 700 (buildZone) + 200 (menu) + 200 (properties)
-const isMenuOpen = ref(false)
-const isPropertiesOpen = ref(false)
-const isDoorsMenuOpen = ref(false)
-const isWindowsMenuOpen = ref(false)
-const isStairsMenuOpen = ref(false)
 
 const handleClickOutside = (event: MouseEvent) => {
   if (!isCompact.value) return
@@ -31,45 +28,10 @@ const handleClickOutside = (event: MouseEvent) => {
 
   if (isMenuOpen.value && menuZoneRef.value && !menuZoneRef.value.contains(target)) {
     isMenuOpen.value = false
+    closeAllSubMenus()
   }
   if (isPropertiesOpen.value && propertiesZoneRef.value && !propertiesZoneRef.value.contains(target)) {
     isPropertiesOpen.value = false
-  }
-}
-const handleDoorsSelect = () => {
-  if (isCompact.value && !isMenuOpen.value) {
-    isMenuOpen.value = true;
-    isDoorsMenuOpen.value = true;
-  } else {
-    isDoorsMenuOpen.value = !isDoorsMenuOpen;
-  }
-  if (isDoorsMenuOpen.value) {
-    isWindowsMenuOpen.value = false;
-    isStairsMenuOpen.value = false;
-  }
-}
-const handleWindowsSelect = () => {
-  if (isCompact.value && !isMenuOpen.value) {
-    isMenuOpen.value = true;
-    isWindowsMenuOpen.value = true;
-  } else {
-    isWindowsMenuOpen.value = !isWindowsMenuOpen.value;
-  }
-  if (isWindowsMenuOpen.value) {
-    isDoorsMenuOpen.value = false;
-    isStairsMenuOpen.value = false;
-  }
-}
-const handleStairsSelect = () => {
-  if (isCompact.value && !isMenuOpen.value) {
-    isMenuOpen.value = true;
-    isStairsMenuOpen.value = true;
-  } else {
-    isStairsMenuOpen.value = !isStairsMenuOpen.value;
-  }
-  if (isStairsMenuOpen.value) {
-    isDoorsMenuOpen.value = false;
-    isWindowsMenuOpen.value = false;
   }
 }
 
@@ -138,7 +100,7 @@ onUnmounted(() => {
 
   <main ref="mainZone" :class="[$style.mainZone, { [$style.compact]: isCompact }]">
     <aside ref="menuZoneRef" :class="[$style.menuZone, { [$style.open]: isMenuOpen }]">
-      <nav :class="$style.title" @click="isMenuOpen = !isMenuOpen">
+      <nav :class="$style.title" @click="toggleMenu">
         <span v-show="!isCompact || isMenuOpen">Architecture</span>
         <span v-if="isCompact" :class="$style.toggleIcon">
           <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: isMenuOpen }]" />
@@ -165,7 +127,7 @@ onUnmounted(() => {
                   ]),
                   { [$style.expanded]: isDoorsMenuOpen }
               ]"
-              @click="handleDoorsSelect"
+              @click="handleDoorsSelect(isCompact)"
           >
             <div :class="$style.menuItemMain">
               <DoorIcon :size="22" />
@@ -202,7 +164,7 @@ onUnmounted(() => {
                   ]),
                   { [$style.expanded]: isWindowsMenuOpen }
               ]"
-              @click="handleWindowsSelect"
+              @click="handleWindowsSelect(isCompact)"
           >
             <div :class="$style.menuItemMain">
               <WindowIcon :size="22" />
@@ -245,7 +207,7 @@ onUnmounted(() => {
                   ]),
                   { [$style.expanded]: isStairsMenuOpen }
               ]"
-              @click="handleStairsSelect"
+              @click="handleStairsSelect(isCompact)"
           >
             <div :class="$style.menuItemMain">
               <StairIcon :size="22" />
@@ -322,7 +284,7 @@ onUnmounted(() => {
     </section>
 
     <aside ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
-      <nav :class="$style.title" @click="isPropertiesOpen = !isPropertiesOpen">
+      <nav :class="$style.title" @click="toggleProperties">
         <span v-if="isCompact" :class="$style.toggleIcon">
           <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: !isPropertiesOpen }]" />
         </span>
