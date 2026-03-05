@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { GRID_SECONDARY_UNIT_SIZE } from '~/composables/toolbar'
+import { usePinch } from '@vueuse/gesture'
 
 const { selectedTool, resetTrigger, zoom, zoomIn, zoomOut, setZoom } = useToolbar()
 const { selectedTool: sidebarSelectedTool } = useToolbarMenu()
@@ -26,6 +27,16 @@ const isSnapped = computed(() => {
 
 const drawingZoneRef = ref<HTMLElement | null>(null)
 
+usePinch(({ offset: [scale] }) => {
+  if (selectedTool.value !== 'move') return
+  setZoom(scale)
+}, {
+  domTarget: drawingZoneRef,
+  eventOptions: { passive: false },
+  from: () => [zoom.value, 0],
+  scaleBounds: { min: 0.1, max: 20 },
+})
+
 const isDrawingMode = computed(() => {
   return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'wall'
 })
@@ -43,7 +54,6 @@ const panX = ref(0)
 const panY = ref(0)
 const lastMouseX = ref(0)
 const lastMouseY = ref(0)
-const lastTouchDist = ref(0)
 
 const isResetting = ref(false)
 
@@ -203,11 +213,6 @@ const onTouchStart = (event: TouchEvent) => {
     isDragging.value = true
     lastMouseX.value = event.touches[0]!.clientX
     lastMouseY.value = event.touches[0]!.clientY
-  } else if (event.touches.length === 2) {
-    isDragging.value = false
-    const touch1 = event.touches[0]!
-    const touch2 = event.touches[1]!
-    lastTouchDist.value = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
   }
 }
 
@@ -223,35 +228,17 @@ const onTouchMove = (event: TouchEvent) => {
 
     lastMouseX.value = event.touches[0]!.clientX
     lastMouseY.value = event.touches[0]!.clientY
-  } else if (event.touches.length === 2) {
-    const touch1 = event.touches[0]!
-    const touch2 = event.touches[1]!
-    const dist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
-    
-    if (lastTouchDist.value > 0) {
-      const zoomFactor = dist / lastTouchDist.value
-      const newZoom = zoom.value * zoomFactor
-      
-      // Limiter le zoom pour éviter des valeurs extrêmes
-      if (newZoom > 0.1 && newZoom < 20) {
-        setZoom(newZoom)
-      }
-    }
-    
-    lastTouchDist.value = dist
   }
 }
 
 const onTouchEnd = (event: TouchEvent) => {
   if (event.touches.length === 0) {
     isDragging.value = false
-    lastTouchDist.value = 0
   } else if (event.touches.length === 1) {
     // Si on repasse de 2 à 1 doigt, on réinitialise le drag pour éviter un saut
     isDragging.value = true
     lastMouseX.value = event.touches[0]!.clientX
     lastMouseY.value = event.touches[0]!.clientY
-    lastTouchDist.value = 0
   }
 }
 
