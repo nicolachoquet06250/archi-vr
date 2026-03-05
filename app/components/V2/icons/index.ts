@@ -11,3 +11,7 @@ export {default as SelectIcon} from './select.vue'
 export {default as SettingsIcon} from './settings.vue'
 export {default as ZoomInIcon} from './zoomIn.vue'
 export {default as ZoomOutIcon} from './zoomOut.vue'
+export {default as Plan2D} from './plan2d.vue'
+// @ts-ignore
+export {default as Plan3D} from './plan3d.vue'
+export {default as PlanVR} from './planvr.vue'
