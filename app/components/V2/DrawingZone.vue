@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GRID_SECONDARY_UNIT_SIZE } from '~/composables/toolbar'
+import { GRID_SECONDARY_UNIT_SIZE, MIN_ZOOM, MAX_ZOOM } from '~/composables/toolbar'
 import { usePinch } from '@vueuse/gesture'
 
 const { selectedTool, resetTrigger, zoom, zoomIn, zoomOut, setZoom } = useToolbar()
@@ -29,13 +29,12 @@ const drawingZoneRef = ref<HTMLElement | null>(null)
 
 usePinch(({ offset: [scale] }) => {
   if (selectedTool.value !== 'move') return;
-  if (scale > 2000 || scale <= -2000) return;
   setZoom(scale)
 }, {
   domTarget: drawingZoneRef,
   eventOptions: { passive: false },
   from: () => [zoom.value, 0],
-  scaleBounds: { min: 0.1, max: 20 },
+  scaleBounds: { min: MIN_ZOOM, max: MAX_ZOOM },
 })
 
 const isDrawingMode = computed(() => {
