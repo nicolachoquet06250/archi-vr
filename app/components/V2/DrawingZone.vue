@@ -76,6 +76,30 @@ const onMouseUp = () => {
   isDragging.value = false
 }
 
+const onTouchStart = (event: TouchEvent) => {
+  if (selectedTool.value !== 'move' || event.touches.length !== 1) return
+  isDragging.value = true
+  lastMouseX.value = event.touches[0].clientX
+  lastMouseY.value = event.touches[0].clientY
+}
+
+const onTouchMove = (event: TouchEvent) => {
+  if (!isDragging.value || selectedTool.value !== 'move' || event.touches.length !== 1) return
+
+  const deltaX = (event.touches[0].clientX - lastMouseX.value)
+  const deltaY = (event.touches[0].clientY - lastMouseY.value)
+
+  panX.value += deltaX
+  panY.value += deltaY
+
+  lastMouseX.value = event.touches[0].clientX
+  lastMouseY.value = event.touches[0].clientY
+}
+
+const onTouchEnd = () => {
+  isDragging.value = false
+}
+
 const cursorStyle = computed(() => {
   if (selectedTool.value === 'move') {
     return isDragging.value ? 'grabbing' : 'grab'
@@ -92,6 +116,9 @@ const cursorStyle = computed(() => {
     @mousemove="onMouseMove"
     @mouseup="onMouseUp"
     @mouseleave="onMouseUp"
+    @touchstart.passive="onTouchStart"
+    @touchmove.prevent="onTouchMove"
+    @touchend="onTouchEnd"
     @wheel="onWheel"
   >
     <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
