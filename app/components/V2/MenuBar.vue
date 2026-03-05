@@ -210,6 +210,15 @@ const {change: changeToolbarSide} = useToolbar()
       border-radius: 0 0 5px 0;
     }
 
+    /*&:last-of-type > button + ul {
+      border-radius: 0 0 0 5px;
+    }*/
+
+    &:nth-last-of-type(-n+2) > button + ul {
+      left: auto;
+      right: 0;
+    }
+
     > button {
       height: 100%;
       width: 100%;
