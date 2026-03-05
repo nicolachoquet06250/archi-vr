@@ -20,7 +20,7 @@ const zoom = ref(1);
 export const GRID_SECONDARY_UNIT_SIZE = 10;
 export const METERS_PER_GRID_UNIT = 1;
 
-export const MIN_ZOOM = 0.15; // 1%
+export const MIN_ZOOM = 0.15; // 15%
 export const MAX_ZOOM = 20;   // 2000%
 
 export const useToolbar = () => ({
