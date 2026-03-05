@@ -247,6 +247,8 @@ const {change: changeToolbarSide} = useToolbar()
         top: 100%;
         left: -1px;
         min-width: 150px;
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
         background-color: #333b3d;
         border-top: none;
         margin: 0;

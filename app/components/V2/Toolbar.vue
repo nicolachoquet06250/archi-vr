@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type {ToolbarSelectedTool} from "~/composables/toolbar";
 import {
   SelectIcon, MoveIcon,
   MultipleSelectIcon, EditIcon,
@@ -22,6 +21,24 @@ const props = withDefaults(defineProps<{
 const $styles = useCssModule()
 
 const {selectedTool, selectTool, resetView, zoomIn, zoomOut, zoom} = useToolbar();
+
+const lastClickTime = ref(0);
+const DOUBLE_TAP_DELAY = 300; // ms
+
+const handleMoveClick = () => {
+  const currentTime = Date.now();
+  const diff = currentTime - lastClickTime.value;
+
+  if (diff > 0 && diff < DOUBLE_TAP_DELAY) {
+    // Double tap détecté
+    resetView();
+    lastClickTime.value = 0; // Reset pour éviter un triple tap
+  } else {
+    // Tap simple
+    selectTool('move');
+    lastClickTime.value = currentTime;
+  }
+};
 
 const containerRef = ref<HTMLElement | null>(null);
 const groupRefs = ref<HTMLElement[]>([]);
@@ -111,11 +128,6 @@ const isActive = (tool: string) => ({
   [$styles.active]: selectedTool.value === tool
 });
 
-const onToolDblClick = (tool: ToolbarSelectedTool) => {
-  if (tool === 'move') {
-    resetView()
-  }
-}
 </script>
 
 <template>
@@ -131,7 +143,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
     </li>
 
     <li>
-      <button :class="isActive('move')" @click="selectTool('move')" @dblclick="onToolDblClick('move')">
+      <button :class="isActive('move')" @click="handleMoveClick">
         <MoveIcon :size="20" />
       </button>
     </li>
@@ -216,7 +228,7 @@ const onToolDblClick = (tool: ToolbarSelectedTool) => {
           <button :class="isActive('selection')" @click="selectTool('selection')">
             <SelectIcon :size="20" />
           </button>
-          <button :class="isActive('move')" @click="selectTool('move')">
+          <button :class="isActive('move')" @click="handleMoveClick">
             <MoveIcon :size="20" />
           </button>
           <button :class="isActive('multiple-selection')" @click="selectTool('multiple-selection')">
