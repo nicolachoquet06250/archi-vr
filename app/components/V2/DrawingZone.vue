@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { GRID_SECONDARY_UNIT_SIZE } from '~/composables/toolbar'
 
-const { selectedTool, resetTrigger, zoom, zoomIn, zoomOut } = useToolbar()
+const { selectedTool, resetTrigger, zoom, zoomIn, zoomOut, setZoom } = useToolbar()
 const { selectedTool: sidebarSelectedTool } = useToolbarMenu()
 
 interface Point {
@@ -43,6 +43,7 @@ const panX = ref(0)
 const panY = ref(0)
 const lastMouseX = ref(0)
 const lastMouseY = ref(0)
+const lastTouchDist = ref(0)
 
 const isResetting = ref(false)
 
@@ -196,27 +197,62 @@ const onMouseUp = () => {
 }
 
 const onTouchStart = (event: TouchEvent) => {
-  if (selectedTool.value !== 'move' || event.touches.length !== 1) return
-  isDragging.value = true
-  lastMouseX.value = event.touches[0]!.clientX
-  lastMouseY.value = event.touches[0]!.clientY
+  if (selectedTool.value !== 'move') return
+  
+  if (event.touches.length === 1) {
+    isDragging.value = true
+    lastMouseX.value = event.touches[0]!.clientX
+    lastMouseY.value = event.touches[0]!.clientY
+  } else if (event.touches.length === 2) {
+    isDragging.value = false
+    const touch1 = event.touches[0]!
+    const touch2 = event.touches[1]!
+    lastTouchDist.value = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
+  }
 }
 
 const onTouchMove = (event: TouchEvent) => {
-  if (!isDragging.value || selectedTool.value !== 'move' || event.touches.length !== 1) return
+  if (selectedTool.value !== 'move') return
 
-  const deltaX = (event.touches[0]!.clientX - lastMouseX.value)
-  const deltaY = (event.touches[0]!.clientY - lastMouseY.value)
+  if (event.touches.length === 1 && isDragging.value) {
+    const deltaX = (event.touches[0]!.clientX - lastMouseX.value)
+    const deltaY = (event.touches[0]!.clientY - lastMouseY.value)
 
-  panX.value += deltaX
-  panY.value += deltaY
+    panX.value += deltaX
+    panY.value += deltaY
 
-  lastMouseX.value = event.touches[0]!.clientX
-  lastMouseY.value = event.touches[0]!.clientY
+    lastMouseX.value = event.touches[0]!.clientX
+    lastMouseY.value = event.touches[0]!.clientY
+  } else if (event.touches.length === 2) {
+    const touch1 = event.touches[0]!
+    const touch2 = event.touches[1]!
+    const dist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
+    
+    if (lastTouchDist.value > 0) {
+      const zoomFactor = dist / lastTouchDist.value
+      const newZoom = zoom.value * zoomFactor
+      
+      // Limiter le zoom pour éviter des valeurs extrêmes
+      if (newZoom > 0.1 && newZoom < 20) {
+        setZoom(newZoom)
+      }
+    }
+    
+    lastTouchDist.value = dist
+  }
 }
 
-const onTouchEnd = () => {
-  isDragging.value = false
+const onTouchEnd = (event: TouchEvent) => {
+  if (event.touches.length === 0) {
+    isDragging.value = false
+    lastTouchDist.value = 0
+  } else if (event.touches.length === 1) {
+    // Si on repasse de 2 à 1 doigt, on réinitialise le drag pour éviter un saut
+    isDragging.value = true
+    lastMouseX.value = event.touches[0]!.clientX
+    lastMouseY.value = event.touches[0]!.clientY
+    lastTouchDist.value = 0
+  }
 }
 
 const cursorStyle = computed(() => {
@@ -240,6 +276,7 @@ const cursorStyle = computed(() => {
     @touchstart.passive="onTouchStart"
     @touchmove.prevent="onTouchMove"
     @touchend="onTouchEnd"
+    @touchcancel="onTouchEnd"
     @wheel="onWheel"
   >
     <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">

@@ -41,4 +41,7 @@ export const useToolbar = () => ({
         zoomOutTrigger.value++;
         zoom.value /= 1.2;
     },
+    setZoom: (value: number) => {
+        zoom.value = value;
+    }
 })
