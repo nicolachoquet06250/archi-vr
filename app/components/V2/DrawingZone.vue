@@ -16,9 +16,29 @@ interface Wall {
 }
 
 const walls = ref<Wall[]>([])
+const selectedWallIndex = ref<number | null>(null)
 const firstPoint = ref<Point | null>(null)
 const initialPoint = ref<Point | null>(null)
 const mousePos = ref<Point | null>(null)
+
+const wallsPathData = computed(() => {
+  if (walls.value.length === 0) return ''
+  
+  let path = ''
+  let currentEnd: Point | null = null
+  
+  walls.value.forEach((wall) => {
+    // Si le point de départ du mur actuel n'est pas le point d'arrivée du précédent, on fait un MoveTo
+    if (!currentEnd || wall.start.x !== currentEnd.x || wall.start.y !== currentEnd.y) {
+      path += `M ${wall.start.x} ${wall.start.y} `
+    }
+    // LineTo vers le point d'arrivée
+    path += `L ${wall.end.x} ${wall.end.y} `
+    currentEnd = wall.end
+  })
+  
+  return path.trim()
+})
 
 const isSnapped = computed(() => {
   if (!mousePos.value || !initialPoint.value || !firstPoint.value) return false
@@ -27,18 +47,34 @@ const isSnapped = computed(() => {
 
 const drawingZoneRef = ref<HTMLElement | null>(null)
 
-usePinch(({ offset: [scale] }) => {
-  if (selectedTool.value !== 'move') return;
-  setZoom(scale)
+usePinch(({ pinching, offset: [s], event }) => {
+  if (event instanceof WheelEvent) {
+    if (event.ctrlKey) event.preventDefault()
+    return
+  }
+  if (pinching) {
+    setZoom(s)
+  }
 }, {
   domTarget: drawingZoneRef,
-  eventOptions: { passive: false },
   from: () => [zoom.value, 0],
   scaleBounds: { min: MIN_ZOOM, max: MAX_ZOOM },
+  filterTaps: true,
+  // On désactive explicitement la reconnaissance du wheel par usePinch
+  // car l'utilisateur a supprimé ses propres wheel events et usePinch
+  // pourrait essayer de les interpréter s'il n'est pas bridé.
+  eventOptions: { passive: false },
+  preventDefault: true,
+  modifierKey: null,
+  pointer: { touch: true }
 })
 
 const isDrawingMode = computed(() => {
   return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'wall'
+})
+
+const isSelectionMode = computed(() => {
+  return selectedTool.value === 'selection' && sidebarSelectedTool.value === 'wall'
 })
 
 const getSvgPoint = (event: MouseEvent | Touch): Point => {
@@ -72,11 +108,12 @@ watch(resetTrigger, () => {
 const onWheel = (event: WheelEvent) => {
   if (event.ctrlKey) {
     event.preventDefault()
-    if (event.deltaY < 0) {
-      zoomIn()
-    } else {
-      zoomOut()
-    }
+
+    const zoomFactor = 1.1
+    const newZoom = event.deltaY < 0
+        ? Math.min(zoom.value * zoomFactor, MAX_ZOOM)
+        : Math.max(zoom.value / zoomFactor, MIN_ZOOM)
+    setZoom(newZoom);
   }
 }
 
@@ -100,10 +137,12 @@ const onKeyDown = (event: KeyboardEvent) => {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
+  drawingZoneRef.value?.addEventListener('wheel', onWheel, { passive: false })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
+  drawingZoneRef.value?.removeEventListener('wheel', onWheel)
 })
 
 const SNAP_TOLERANCE = 1.0 // Unité SVG (environ 1m dans la config actuelle)
@@ -154,6 +193,41 @@ const onMouseDown = (event: MouseEvent) => {
     }
     return
   }
+  
+  if (isSelectionMode.value) {
+    const point = getSvgPoint(event)
+    let minDistance = Infinity
+    let closestWallIndex = null
+    const threshold = 10 / zoom.value // Seuil de sélection (environ 10px écran)
+
+    walls.value.forEach((wall, index) => {
+      // Distance point à segment
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const l2 = dx * dx + dy * dy
+      
+      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / l2
+      t = Math.max(0, Math.min(1, t))
+      
+      const dist = Math.sqrt(
+        Math.pow(point.x - (wall.start.x + t * dx), 2) +
+        Math.pow(point.y - (wall.start.y + t * dy), 2)
+      )
+      
+      if (dist < minDistance) {
+        minDistance = dist
+        closestWallIndex = index
+      }
+    })
+
+    if (minDistance < threshold) {
+      selectedWallIndex.value = closestWallIndex
+    } else {
+      selectedWallIndex.value = null
+    }
+    return
+  }
+
   if (selectedTool.value !== 'move') return
   isDragging.value = true
   lastMouseX.value = event.clientX
@@ -244,10 +318,95 @@ const onTouchEnd = (event: TouchEvent) => {
 
 const cursorStyle = computed(() => {
   if (isDrawingMode.value) return 'crosshair'
+  if (isSelectionMode.value) return 'pointer'
   if (selectedTool.value === 'move') {
     return isDragging.value ? 'grabbing' : 'grab'
   }
   return 'default'
+})
+
+const selectedWall = computed(() => {
+  if (selectedWallIndex.value === null) return null
+  return walls.value[selectedWallIndex.value] || null
+})
+
+const selectedWallDistance = computed(() => {
+  if (!selectedWall.value) return 0
+  const wall = selectedWall.value
+  const dx = wall.end.x - wall.start.x
+  const dy = wall.end.y - wall.start.y
+  // GRID_SECONDARY_UNIT_SIZE = 10 unités SVG pour 1 mètre
+  return Math.sqrt(dx * dx + dy * dy) / GRID_SECONDARY_UNIT_SIZE
+})
+
+const selectedWallCenter = computed(() => {
+  if (!selectedWall.value) return { x: 0, y: 0 }
+  const wall = selectedWall.value
+  return {
+    x: (wall.start.x + wall.end.x) / 2,
+    y: (wall.start.y + wall.end.y) / 2
+  }
+})
+
+const selectedWallAngle = computed(() => {
+  if (!selectedWall.value) return 0
+  const wall = selectedWall.value
+  return Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * (180 / Math.PI)
+})
+
+const selectedWallTextRotation = computed(() => {
+  let angle = selectedWallAngle.value
+  // atan2 renvoie un angle entre -180 et 180.
+  // Si l'angle est dans la moitié gauche du cercle (>90 ou <-90), 
+  // on lui ajoute 180 pour que le texte soit à l'endroit.
+  if (angle > 90 || angle < -90) {
+    angle += 180
+  }
+  return angle
+})
+
+const selectedWallTextOffset = computed(() => {
+  const angle = selectedWallAngle.value
+  // Si on a retourné le texte (angle > 90 ou < -90),
+  // il faut aussi inverser l'offset pour qu'il reste du même côté visuel du mur
+  return (angle > 90 || angle < -90) ? 25 : -25
+})
+
+const selectedWallOffsetVectors = computed(() => {
+  if (!selectedWall.value) return { normalX: 0, normalY: 0 }
+  const wall = selectedWall.value
+  const dx = wall.end.x - wall.start.x
+  const dy = wall.end.y - wall.start.y
+  const length = Math.sqrt(dx * dx + dy * dy)
+  if (length === 0) return { normalX: 0, normalY: 0 }
+  
+  // Vecteur normal (perpendiculaire)
+  return {
+    normalX: -dy / length,
+    normalY: dx / length
+  }
+})
+
+const selectedWallMeasurementLines = computed(() => {
+  if (!selectedWall.value) return []
+  const wall = selectedWall.value
+  const { normalX, normalY } = selectedWallOffsetVectors.value
+  const offset = 15 // Distance du mur
+  
+  return [
+    {
+      x1: wall.start.x + normalX * offset,
+      y1: wall.start.y + normalY * offset,
+      x2: wall.end.x + normalX * offset,
+      y2: wall.end.y + normalY * offset
+    },
+    {
+      x1: wall.start.x - normalX * offset,
+      y1: wall.start.y - normalY * offset,
+      x2: wall.end.x - normalX * offset,
+      y2: wall.end.y - normalY * offset
+    }
+  ]
 })
 </script>
 
@@ -264,7 +423,6 @@ const cursorStyle = computed(() => {
     @touchmove.prevent="onTouchMove"
     @touchend="onTouchEnd"
     @touchcancel="onTouchEnd"
-    @wheel="onWheel"
   >
     <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -277,6 +435,9 @@ const cursorStyle = computed(() => {
           <rect :width="GRID_SECONDARY_UNIT_SIZE * 10" :height="GRID_SECONDARY_UNIT_SIZE * 10" fill="url(#smallGrid)"/>
           <path :d="`M ${GRID_SECONDARY_UNIT_SIZE * 10} 0 L 0 0 0 ${GRID_SECONDARY_UNIT_SIZE * 10}`" fill="none" stroke="#e0e0e0" stroke-width="1"/>
         </pattern>
+        <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="orange" />
+        </marker>
       </defs>
 
       <g 
@@ -286,17 +447,63 @@ const cursorStyle = computed(() => {
         <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#grid)" />
 
         <!-- Murs fixés -->
-        <line
-          v-for="(wall, index) in walls"
-          :key="index"
-          :x1="wall.start.x"
-          :y1="wall.start.y"
-          :x2="wall.end.x"
-          :y2="wall.end.y"
+        <path
+          :d="wallsPathData"
           stroke="black"
           stroke-width="5"
           stroke-linecap="round"
+          stroke-linejoin="round"
+          fill="none"
         />
+
+        <!-- Segment sélectionné (on le garde en plus pour l'affichage orange) -->
+        <g v-if="selectedWall">
+          <line
+            :x1="selectedWall.start.x"
+            :y1="selectedWall.start.y"
+            :x2="selectedWall.end.x"
+            :y2="selectedWall.end.y"
+            stroke="orange"
+            stroke-width="5"
+            stroke-linecap="round"
+          />
+          <circle
+            :cx="selectedWall.start.x"
+            :cy="selectedWall.start.y"
+            :r="6"
+            fill="orange"
+          />
+          <circle
+            :cx="selectedWall.end.x"
+            :cy="selectedWall.end.y"
+            :r="6"
+            fill="orange"
+          />
+          <!-- Flèches en pointillés avec distance (doubles) -->
+          <line
+            v-for="(line, idx) in selectedWallMeasurementLines"
+            :key="idx"
+            :x1="line.x1"
+            :y1="line.y1"
+            :x2="line.x2"
+            :y2="line.y2"
+            stroke="orange"
+            stroke-width="1"
+            stroke-dasharray="4,4"
+            marker-start="url(#arrow)"
+            marker-end="url(#arrow)"
+          />
+          <text
+            fill="orange"
+            font-size="12"
+            text-anchor="middle"
+            alignment-baseline="middle"
+            :transform="`translate(${selectedWallCenter.x}, ${selectedWallCenter.y}) rotate(${selectedWallTextRotation}) translate(0, ${selectedWallTextOffset})`"
+            style="user-select: none; font-weight: bold; paint-order: stroke; stroke: white; stroke-width: 3px;"
+          >
+            {{ selectedWallDistance.toFixed(2) }}m
+          </text>
+        </g>
 
         <!-- Mur de prévisualisation -->
         <line
@@ -335,6 +542,7 @@ const cursorStyle = computed(() => {
   height: 100%;
   z-index: 0;
   pointer-events: all;
+  touch-action: none;
 }
 
 .transitioning {
