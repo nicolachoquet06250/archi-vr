@@ -6,6 +6,7 @@ import {
   ZoomInIcon, ZoomOutIcon,
   LayerIcon, SettingsIcon,
   DeletionIcon, MoreIcon,
+  ResizeIcon,
 } from '~/components/V2/icons';
 
 const props = withDefaults(defineProps<{
@@ -151,6 +152,12 @@ const isActive = (tool: string) => ({
     <li>
       <button :class="isActive('multiple-selection')" @click="selectTool('multiple-selection')">
         <MultipleSelectIcon :size="20" />
+      </button>
+    </li>
+
+    <li>
+      <button :class="isActive('resize')" @click="selectTool('resize')">
+        <ResizeIcon :size="20" />
       </button>
     </li>
   </ul>

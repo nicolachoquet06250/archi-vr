@@ -11,12 +11,24 @@ interface Point {
 }
 
 interface Wall {
+  id: string;
   start: Point;
   end: Point;
+  openings: Opening[];
+}
+
+interface Opening {
+  id: string;
+  type: 'door' | 'window';
+  variant: 'simple' | 'double' | 'bay';
+  position: number; // 0 à 1 (le long du mur)
+  width: number; // en unités SVG
+  flipped: boolean; // côté d'ouverture
 }
 
 const walls = ref<Wall[]>([])
 const selectedWallIndex = ref<number | null>(null)
+const selectedOpeningId = ref<string | null>(null)
 const firstPoint = ref<Point | null>(null)
 const initialPoint = ref<Point | null>(null)
 const mousePos = ref<Point | null>(null)
@@ -77,6 +89,36 @@ const isSelectionMode = computed(() => {
   return selectedTool.value === 'selection' && sidebarSelectedTool.value === 'wall'
 })
 
+const isDoorSelectionMode = computed(() => {
+  return selectedTool.value === 'selection' && (
+    sidebarSelectedTool.value === 'door-simple' || 
+    sidebarSelectedTool.value === 'door-double' || 
+    sidebarSelectedTool.value === 'window-simple' || 
+    sidebarSelectedTool.value === 'window-double' || 
+    sidebarSelectedTool.value === 'window-bay'
+  )
+})
+
+const isBayWindowMode = computed(() => {
+  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'window-bay'
+})
+
+const isDoorMode = computed(() => {
+  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'door-simple'
+})
+
+const isDoubleDoorMode = computed(() => {
+  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'door-double'
+})
+
+const isWindowMode = computed(() => {
+  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'window-simple'
+})
+
+const isDoubleWindowMode = computed(() => {
+  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'window-double'
+})
+
 const getSvgPoint = (event: MouseEvent | Touch): Point => {
   if (!drawingZoneRef.value) return { x: 0, y: 0 }
   const rect = drawingZoneRef.value.getBoundingClientRect()
@@ -85,7 +127,12 @@ const getSvgPoint = (event: MouseEvent | Touch): Point => {
   return { x, y }
 }
 
+const isResizeMode = computed(() => {
+  return selectedTool.value === 'resize' && (sidebarSelectedTool.value === 'window-bay')
+})
+
 const isDragging = ref(false)
+const isResizing = ref<'left' | 'right' | null>(null)
 const panX = ref(0)
 const panY = ref(0)
 const lastMouseX = ref(0)
@@ -168,8 +215,10 @@ const onMouseDown = (event: MouseEvent) => {
       if (dist < SNAP_TOLERANCE) { 
         // On ferme le tracé avec un mur vers le point initial exact pour une fermeture propre
         walls.value.push({
+          id: crypto.randomUUID(),
           start: firstPoint.value,
-          end: { ...initialPoint.value }
+          end: { ...initialPoint.value },
+          openings: []
         })
         firstPoint.value = null
         initialPoint.value = null
@@ -179,17 +228,77 @@ const onMouseDown = (event: MouseEvent) => {
     }
 
     if (!firstPoint.value) {
+      const point = getSvgPoint(event)
       firstPoint.value = point
       initialPoint.value = point
       mousePos.value = point
     } else {
+      const point = getSvgPoint(event)
       walls.value.push({
+        id: crypto.randomUUID(),
         start: firstPoint.value,
-        end: point
+        end: point,
+        openings: []
       })
       // Au lieu de mettre firstPoint à null, on le met au point actuel pour continuer
       firstPoint.value = point
       mousePos.value = point
+    }
+    return
+  }
+
+  if (isDoorMode.value || isDoubleDoorMode.value || isWindowMode.value || isDoubleWindowMode.value || isBayWindowMode.value) {
+    const point = getSvgPoint(event)
+    let minDistance = Infinity
+    let closestWallIndex: number | null = null
+    const threshold = 20 / zoom.value // Augmentation du seuil pour faciliter le placement des portes et fenêtres
+
+    walls.value.forEach((wall, index) => {
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const l2 = dx * dx + dy * dy
+      if (l2 === 0) return
+
+      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / l2
+      t = Math.max(0, Math.min(1, t))
+
+      const dist = Math.sqrt(
+        Math.pow(point.x - (wall.start.x + t * dx), 2) +
+        Math.pow(point.y - (wall.start.y + t * dy), 2)
+      )
+
+      if (dist < minDistance) {
+        minDistance = dist
+        closestWallIndex = index
+      }
+    })
+
+    if (closestWallIndex !== null && minDistance < threshold) {
+      const wall = walls.value[closestWallIndex]
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const l2 = dx * dx + dy * dy
+      const wallLength = Math.sqrt(l2)
+      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / l2
+      t = Math.max(0, Math.min(1, t))
+
+      const isWindow = isWindowMode.value || isDoubleWindowMode.value || isBayWindowMode.value
+      const width = (isDoubleDoorMode.value || isDoubleWindowMode.value || isBayWindowMode.value) ? 20 : 10
+      
+      // Ajuster t pour les ouvertures centrées (toutes sauf variant 'bay')
+      let finalT = t
+      if (isBayWindowMode.value) {
+          finalT = Math.max(0, Math.min(1 - (width / wallLength), t))
+      }
+
+      wall.openings.push({
+        id: crypto.randomUUID(),
+        type: isWindow ? 'window' : 'door',
+        variant: (isDoubleDoorMode.value || isDoubleWindowMode.value) ? 'double' : (isBayWindowMode.value ? 'bay' : 'simple'),
+        position: finalT,
+        width: width, // ~2 mètres pour double/bay ouverture, ~1 mètre pour le reste
+        flipped: false
+      })
     }
     return
   }
@@ -228,6 +337,45 @@ const onMouseDown = (event: MouseEvent) => {
     return
   }
 
+  if (isDoorSelectionMode.value) {
+    const point = getSvgPoint(event)
+    let minDistance = Infinity
+    let closestOpeningId = null
+    const threshold = 15 / zoom.value
+
+    walls.value.forEach((wall) => {
+      wall.openings.forEach((opening) => {
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const wallLength = Math.sqrt(dx * dx + dy * dy)
+        if (wallLength === 0) return
+        
+        // Point d'origine de l'ouverture sur le mur
+        const ox = wall.start.x + dx * opening.position
+        const oy = wall.start.y + dy * opening.position
+
+        // Calcul du centre de l'ouverture
+        // Toutes les ouvertures (y compris bay) ont maintenant leur centre décalé de width/2 par rapport à leur origine
+        const cx = ox + (dx / wallLength) * (opening.width / 2)
+        const cy = oy + (dy / wallLength) * (opening.width / 2)
+        
+        const dist = Math.sqrt(Math.pow(point.x - cx, 2) + Math.pow(point.y - cy, 2))
+        
+        if (dist < minDistance) {
+          minDistance = dist
+          closestOpeningId = opening.id
+        }
+      })
+    })
+
+    if (minDistance < threshold) {
+      selectedOpeningId.value = closestOpeningId
+    } else {
+      selectedOpeningId.value = null
+    }
+    return
+  }
+
   if (selectedTool.value !== 'move') return
   isDragging.value = true
   lastMouseX.value = event.clientX
@@ -235,6 +383,44 @@ const onMouseDown = (event: MouseEvent) => {
 }
 
 const onMouseMove = (event: MouseEvent) => {
+  if (isResizing.value && selectedOpeningId.value) {
+    const point = getSvgPoint(event)
+    
+    // Trouver le mur et l'ouverture correspondante
+    for (const wall of walls.value) {
+      const openingIndex = wall.openings.findIndex(o => o.id === selectedOpeningId.value)
+      if (openingIndex !== -1) {
+        const opening = wall.openings[openingIndex]
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const wallLength = Math.sqrt(dx * dx + dy * dy)
+        
+        // Projection du point de la souris sur le mur pour obtenir le nouveau 't' (position relative)
+        let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / (wallLength * wallLength)
+        t = Math.max(0, Math.min(1, t))
+        
+        if (isResizing.value === 'right') {
+          // Calculer la nouvelle largeur en fonction de la distance entre le point de départ actuel et le point de la souris
+          const currentStartPos = opening.position
+          const newWidth = (t - currentStartPos) * wallLength
+          if (newWidth > 1) { // Largeur minimale de 1 unité SVG
+            opening.width = newWidth
+          }
+        } else if (isResizing.value === 'left') {
+          // On déplace le point de départ et on ajuste la largeur
+          const currentEndPos = opening.position + (opening.width / wallLength)
+          const newWidth = (currentEndPos - t) * wallLength
+          if (newWidth > 1) {
+            opening.position = t
+            opening.width = newWidth
+          }
+        }
+        break
+      }
+    }
+    return
+  }
+
   if (isDrawingMode.value && firstPoint.value) {
     let point = getSvgPoint(event)
     
@@ -278,6 +464,7 @@ const onMouseMove = (event: MouseEvent) => {
 
 const onMouseUp = () => {
   isDragging.value = false
+  isResizing.value = null
 }
 
 const onTouchStart = (event: TouchEvent) => {
@@ -316,9 +503,30 @@ const onTouchEnd = (event: TouchEvent) => {
   }
 }
 
+const selectedOpening = computed(() => {
+  if (!selectedOpeningId.value) return null
+  for (const wall of walls.value) {
+    const opening = wall.openings.find(o => o.id === selectedOpeningId.value)
+    if (opening) return { wall, opening }
+  }
+  return null
+})
+
+const resizeCursorStyle = computed(() => {
+  if (!selectedOpening.value) return 'ew-resize'
+  const { wall } = selectedOpening.value
+  const dx = Math.abs(wall.end.x - wall.start.x)
+  const dy = Math.abs(wall.end.y - wall.start.y)
+  
+  // Si dx > dy, le mur est plus horizontal que vertical
+  return dx >= dy ? 'ew-resize' : 'ns-resize'
+})
+
 const cursorStyle = computed(() => {
   if (isDrawingMode.value) return 'crosshair'
-  if (isSelectionMode.value) return 'pointer'
+  if (isDoorMode.value || isDoubleDoorMode.value || isWindowMode.value || isDoubleWindowMode.value || isBayWindowMode.value) return 'copy'
+  if (isSelectionMode.value || isDoorSelectionMode.value) return 'pointer'
+  if (selectedTool.value === 'resize' && selectedOpeningId.value) return resizeCursorStyle.value
   if (selectedTool.value === 'move') {
     return isDragging.value ? 'grabbing' : 'grab'
   }
@@ -387,6 +595,27 @@ const selectedWallOffsetVectors = computed(() => {
   }
 })
 
+const getOpeningTransform = (wall: Wall, opening: Opening) => {
+  const dx = wall.end.x - wall.start.x
+  const dy = wall.end.y - wall.start.y
+  const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+  const x = wall.start.x + dx * opening.position
+  const y = wall.start.y + dy * opening.position
+  
+  if (opening.variant === 'double' || opening.type === 'window') {
+      // Pour une double porte ou une fenêtre (simple/double/bay), on se positionne au milieu de l'ouverture
+      // SAUF si on est en train de redimensionner par la gauche ou si on est en mode bay
+      // En fait, pour la 'bay' et le redimensionnement, il vaut mieux se baser sur le point de départ de l'ouverture (x,y) 
+      // et ne pas décaler de width/2 si on veut que le redimensionnement soit intuitif (le point (0,0) de l'ouverture est son bord gauche).
+      if (opening.variant === 'bay') {
+          return `translate(${x}, ${y}) rotate(${angle})`
+      }
+      return `translate(${x}, ${y}) rotate(${angle}) translate(${-opening.width / 2}, 0)`
+  }
+  
+  return `translate(${x}, ${y}) rotate(${angle})`
+}
+
 const selectedWallMeasurementLines = computed(() => {
   if (!selectedWall.value) return []
   const wall = selectedWall.value
@@ -447,14 +676,148 @@ const selectedWallMeasurementLines = computed(() => {
         <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#grid)" />
 
         <!-- Murs fixés -->
-        <path
-          :d="wallsPathData"
-          stroke="black"
-          stroke-width="5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          fill="none"
-        />
+        <g v-for="wall in walls" :key="wall.id">
+          <line
+            :x1="wall.start.x"
+            :y1="wall.start.y"
+            :x2="wall.end.x"
+            :y2="wall.end.y"
+            stroke="black"
+            stroke-width="5"
+            stroke-linecap="round"
+          />
+          <!-- Portes -->
+          <g v-for="opening in wall.openings" :key="opening.id">
+            <g v-if="opening.type === 'door'" :transform="getOpeningTransform(wall, opening)">
+              <!-- L'ouverture dans le mur -->
+              <line 
+                x1="0" y1="0" 
+                :x2="opening.width" y2="0" 
+                stroke="white" 
+                stroke-width="6" 
+                :style="{ cursor: isDoorSelectionMode ? 'pointer' : undefined }"
+              />
+              <!-- Porte simple -->
+              <template v-if="opening.variant === 'simple'">
+                <line 
+                  x1="0" y1="0" 
+                  :x2="0" :y2="-opening.width" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'brown'" 
+                  stroke-width="2" 
+                />
+                <path 
+                  :d="`M 0 ${-opening.width} A ${opening.width} ${opening.width} 0 0 1 ${opening.width} 0`" 
+                  fill="none" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'brown'" 
+                  stroke-width="1" 
+                  stroke-dasharray="2,2" 
+                />
+              </template>
+              <!-- Double porte -->
+              <template v-else-if="opening.variant === 'double'">
+                <!-- Battant gauche -->
+                <line 
+                  x1="0" y1="0" 
+                  :x2="0" :y2="-opening.width / 2" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'brown'" 
+                  stroke-width="2" 
+                />
+                <path 
+                  :d="`M 0 ${-opening.width / 2} A ${opening.width / 2} ${opening.width / 2} 0 0 1 ${opening.width / 2} 0`" 
+                  fill="none" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'brown'" 
+                  stroke-width="1" 
+                  stroke-dasharray="2,2" 
+                />
+                <!-- Battant droit -->
+                <line 
+                  :x1="opening.width" y1="0" 
+                  :x2="opening.width" :y2="-opening.width / 2" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'brown'" 
+                  stroke-width="2" 
+                />
+                <path 
+                  :d="`M ${opening.width} ${-opening.width / 2} A ${opening.width / 2} ${opening.width / 2} 0 0 0 ${opening.width / 2} 0`" 
+                  fill="none" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'brown'" 
+                  stroke-width="1" 
+                  stroke-dasharray="2,2" 
+                />
+              </template>
+            </g>
+
+            <!-- Fenêtres -->
+            <g v-else-if="opening.type === 'window'" :transform="getOpeningTransform(wall, opening)">
+              <!-- Cadre de la fenêtre -->
+              <rect 
+                x="0" y="-4" 
+                :width="opening.width" height="8" 
+                fill="white" 
+                :stroke="selectedOpeningId === opening.id ? 'orange' : 'black'" 
+                stroke-width="1" 
+                :style="{ cursor: isDoorSelectionMode ? 'pointer' : undefined }"
+              />
+              <!-- Ligne(s) centrale(s) de la vitre -->
+              <template v-if="opening.variant === 'simple'">
+                <line 
+                  x1="0" y1="0" 
+                  :x2="opening.width" y2="0" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'blue'" 
+                  stroke-width="1" 
+                />
+              </template>
+              <template v-else-if="opening.variant === 'double'">
+                <line 
+                  x1="0" y1="0" 
+                  :x2="opening.width" y2="0" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'blue'" 
+                  stroke-width="1" 
+                />
+                <!-- Montant central pour distinguer la double fenêtre -->
+                <line 
+                  :x1="opening.width / 2" y1="-4" 
+                  :x2="opening.width / 2" y2="4" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'black'" 
+                  stroke-width="1" 
+                />
+              </template>
+              <template v-else-if="opening.variant === 'bay'">
+                <!-- Baie vitrée : deux lignes parallèles pour l'effet coulissant -->
+                <line 
+                  x1="0" y1="-2" 
+                  :x2="opening.width" y2="-2" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'blue'" 
+                  stroke-width="1" 
+                />
+                <line 
+                  x1="0" y1="2" 
+                  :x2="opening.width" y2="2" 
+                  :stroke="selectedOpeningId === opening.id ? 'orange' : 'blue'" 
+                  stroke-width="1" 
+                />
+                <!-- Montants latéraux -->
+                <line x1="0" y1="-4" x2="0" y2="4" :stroke="selectedOpeningId === opening.id ? 'orange' : 'black'" stroke-width="1" />
+                <line :x1="opening.width" y1="-4" :x2="opening.width" y2="4" :stroke="selectedOpeningId === opening.id ? 'orange' : 'black'" stroke-width="1" />
+              </template>
+              
+              <!-- Poignées de redimensionnement (visibles uniquement en mode resize) -->
+              <template v-if="isResizeMode && selectedOpeningId === opening.id">
+                <circle 
+                  cx="0" cy="0" r="4" 
+                  fill="white" stroke="orange" stroke-width="2" 
+                  :style="{ cursor: resizeCursorStyle }"
+                  @mousedown.stop="isResizing = 'left'"
+                />
+                <circle 
+                  :cx="opening.width" cy="0" r="4" 
+                  fill="white" stroke="orange" stroke-width="2" 
+                  :style="{ cursor: resizeCursorStyle }"
+                  @mousedown.stop="isResizing = 'right'"
+                />
+              </template>
+            </g>
+          </g>
+        </g>
 
         <!-- Segment sélectionné (on le garde en plus pour l'affichage orange) -->
         <g v-if="selectedWall">

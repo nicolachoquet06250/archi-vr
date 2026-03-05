@@ -5,7 +5,7 @@ export type ToolbarSelectedTool =
     'multiple-selection' | 'edit' |
     'measure' | 'paint' |
     'layer' | 'settings' |
-    'deletion';
+    'deletion' | 'resize';
 
 const toolbarSide = ref<ToolbarSide>('left');
 const selectedToolbarTool = ref<ToolbarSelectedTool>('selection');
