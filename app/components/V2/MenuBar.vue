@@ -235,7 +235,6 @@ const {change: changeToolbarSide} = useToolbar()
         left: -1px;
         min-width: 150px;
         background-color: #333b3d;
-        border: 1px solid #cfd1d2;
         border-top: none;
         margin: 0;
         padding: 0 0 5px;

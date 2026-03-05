@@ -35,11 +35,17 @@ header {
 }
 
 .title {
-  display: inline-flex;
+  height: 100%;
+  display: flex;
   flex-direction: row;
   justify-content: center;
   align-items: center;
+  vertical-align: bottom;
+  -webkit-user-select: none;
+  -moz-user-select: none;
   user-select: none;
+  align-self: flex-end;
+  margin-bottom: 5px;
 
   > span {
     font-size: 2rem;
