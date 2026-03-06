@@ -12,6 +12,7 @@ const $styles = useCssModule();
 
 const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
+const { viewMode } = useViewMode()
 const { isMenuOpen, isPropertiesOpen, toggleMenu, toggleProperties, closeAll: closeSidebar } = useSidebar()
 const { selectedRoomIds, totalSelectedArea, clearRoomSelection } = useRoomSelection()
 const { isWallsMenuOpen, isDoorsMenuOpen, isWindowsMenuOpen, isStairsMenuOpen, handleWallsSelect, handleDoorsSelect, handleWindowsSelect, handleStairsSelect, closeAllSubMenus, selectedTool, selectTool } = useToolbarMenu()
@@ -101,7 +102,7 @@ onUnmounted(() => {
   <AppHeaderZone />
 
   <main ref="mainZone" :class="[$style.mainZone, { [$style.compact]: isCompact }]">
-    <aside ref="menuZoneRef" :class="[$style.menuZone, { [$style.open]: isMenuOpen }]">
+    <aside v-if="viewMode === '2D'" ref="menuZoneRef" :class="[$style.menuZone, { [$style.open]: isMenuOpen }]">
       <nav :class="$style.title" @click="toggleMenu">
         <span v-show="!isCompact || isMenuOpen">Architecture</span>
         <span v-if="isCompact" :class="$style.toggleIcon">
@@ -305,6 +306,7 @@ onUnmounted(() => {
       <BuildZoneTabs />
 
       <Toolbar
+          v-if="viewMode === '2D'"
           :class="[$style.toolbar, position]"
           :horizontal="['top', 'bottom'].includes(toolbarSide)"
           :vertical="['left', 'right'].includes(toolbarSide)"
@@ -314,7 +316,7 @@ onUnmounted(() => {
       <Compass v-show="showCompass" size="100px" :class="$style.compass" />
     </section>
 
-    <aside ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
+    <aside v-if="viewMode === '2D'" ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
       <nav :class="$style.title" @click="() => { toggleProperties(); if (!isPropertiesOpen) { clearRoomSelection(); } }">
         <span v-if="isCompact" :class="$style.toggleIcon">
           <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: isPropertiesOpen }]" />

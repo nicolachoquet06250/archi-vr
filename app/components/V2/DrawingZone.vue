@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { GRID_SECONDARY_UNIT_SIZE, MIN_ZOOM, MAX_ZOOM } from '~/composables/toolbar'
 import { usePinch } from '@vueuse/gesture'
+import ThreeScene from '~/components/V2/ThreeScene.vue'
 
 const { selectedTool, resetTrigger, zoom, zoomIn, zoomOut, setZoom } = useToolbar()
 const { selectedTool: sidebarSelectedTool } = useToolbarMenu()
 const { selectedRoomIds, totalSelectedArea, toggleRoomSelection, clearRoomSelection } = useRoomSelection()
+const { viewMode } = useViewMode()
 
 interface Point {
   x: number;
@@ -1781,16 +1783,17 @@ watch(
     ref="drawingZoneRef"
     :class="$style.drawingZone" 
     :style="{ cursor: cursorStyle }"
-    @mousedown="onMouseDown"
-    @mousemove="onMouseMove"
-    @mouseup="onMouseUp"
-    @mouseleave="onMouseUp"
-    @touchstart.passive="onTouchStart"
-    @touchmove.prevent="onTouchMove"
-    @touchend="onTouchEnd"
-    @touchcancel="onTouchEnd"
+    @mousedown="viewMode === '2D' ? onMouseDown : undefined"
+    @mousemove="viewMode === '2D' ? onMouseMove : undefined"
+    @mouseup="viewMode === '2D' ? onMouseUp : undefined"
+    @mouseleave="viewMode === '2D' ? onMouseUp : undefined"
+    @touchstart.passive="viewMode === '2D' ? onTouchStart : undefined"
+    @touchmove.prevent="viewMode === '2D' ? onTouchMove : undefined"
+    @touchend="viewMode === '2D' ? onTouchEnd : undefined"
+    @touchcancel="viewMode === '2D' ? onTouchEnd : undefined"
   >
-    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <ThreeScene v-if="viewMode === '3D'" :walls="walls" :rooms="rooms" />
+    <svg v-else width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <!-- Grille secondaire (petits carreaux) -->
         <pattern id="smallGrid" :width="GRID_SECONDARY_UNIT_SIZE" :height="GRID_SECONDARY_UNIT_SIZE" patternUnits="userSpaceOnUse">

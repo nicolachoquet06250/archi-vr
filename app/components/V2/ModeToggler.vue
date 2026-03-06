@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import {Plan2D, Plan3D, PlanVR} from "~/components/V2/icons";
+
+const { viewMode, setViewMode } = useViewMode();
 </script>
 
 <template>
   <section :class="[$style.modeToggler, 'mode-bar']">
     <!-- LEFT (hover/active look) -->
-    <button class="mode-btn active" type="button">
+    <button :class="['mode-btn', { active: viewMode === '2D' }]" type="button" @click="setViewMode('2D')">
       <span class="mode-icon" aria-hidden="true">
         <!-- Placeholder SVG "plan" -->
         <Plan2D :size="40" />
@@ -14,7 +16,7 @@ import {Plan2D, Plan3D, PlanVR} from "~/components/V2/icons";
     </button>
 
     <!-- MIDDLE (normal) -->
-    <button class="mode-btn" type="button">
+    <button :class="['mode-btn', { active: viewMode === '3D' }]" type="button" @click="setViewMode('3D')">
       <span class="mode-icon" aria-hidden="true">
         <!-- Placeholder SVG "3D box" -->
         <Plan3D :size="40" />
