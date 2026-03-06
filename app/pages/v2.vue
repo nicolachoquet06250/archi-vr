@@ -13,6 +13,7 @@ const $styles = useCssModule();
 const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
 const { isMenuOpen, isPropertiesOpen, toggleMenu, toggleProperties, closeAll: closeSidebar } = useSidebar()
+const { selectedRoomIds, totalSelectedArea, clearRoomSelection } = useRoomSelection()
 const { isDoorsMenuOpen, isWindowsMenuOpen, isStairsMenuOpen, handleDoorsSelect, handleWindowsSelect, handleStairsSelect, closeAllSubMenus, selectedTool, selectTool } = useToolbarMenu()
 
 const mainZone = ref<HTMLElement | null>(null)
@@ -32,6 +33,7 @@ const handleClickOutside = (event: MouseEvent) => {
   }
   if (isPropertiesOpen.value && propertiesZoneRef.value && !propertiesZoneRef.value.contains(target)) {
     isPropertiesOpen.value = false
+    clearRoomSelection()
   }
 }
 
@@ -284,7 +286,7 @@ onUnmounted(() => {
     </section>
 
     <aside ref="propertiesZoneRef" :class="[$style.propertiesZone, { [$style.open]: isPropertiesOpen }]">
-      <nav :class="$style.title" @click="toggleProperties">
+      <nav :class="$style.title" @click="() => { toggleProperties(); if (!isPropertiesOpen) { clearRoomSelection(); } }">
         <span v-if="isCompact" :class="$style.toggleIcon">
           <ChevronIcon :size="12" :class="[$style.chevron, { [$style.expanded]: isPropertiesOpen }]" />
         </span>
@@ -293,6 +295,10 @@ onUnmounted(() => {
 
       <div :class="$style.content">
         <!-- Contenu des propriétés ici -->
+        <div v-if="selectedRoomIds.length > 0" :class="$style.propertyItem">
+          <label>{{ selectedRoomIds.length > 1 ? 'Superficie totale :' : 'Superficie de la pièce :' }}</label>
+          <span>{{ (totalSelectedArea / 100).toFixed(2) }} m²</span>
+        </div>
       </div>
     </aside>
   </main>
@@ -426,6 +432,23 @@ onUnmounted(() => {
   left: 5px;
 }
 
+.propertyItem {
+  margin-bottom: 15px;
+  color: #cfd1d2;
+
+  label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 5px;
+    color: #888;
+  }
+
+  span {
+    font-size: 16px;
+    font-weight: bold;
+  }
+}
+
 .toggleIcon {
   font-size: 10px;
 }
@@ -433,6 +456,7 @@ onUnmounted(() => {
 .content {
   flex: 1;
   overflow-y: auto;
+  padding: 10px;
 }
 
 .menuList {
