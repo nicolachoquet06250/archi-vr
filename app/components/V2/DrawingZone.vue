@@ -4,6 +4,7 @@ import { usePinch } from '@vueuse/gesture'
 
 const { selectedTool, resetTrigger, zoom, zoomIn, zoomOut, setZoom } = useToolbar()
 const { selectedTool: sidebarSelectedTool } = useToolbarMenu()
+const { selectedRoomIds, totalSelectedArea, toggleRoomSelection, clearRoomSelection } = useRoomSelection()
 
 interface Point {
   x: number;
@@ -26,31 +27,26 @@ interface Opening {
   flipped: boolean; // côté d'ouverture
 }
 
+interface RoomFace {
+  id: string;
+  points: Point[];
+  area: number;
+  color: string;
+}
+
+const WALL_STROKE_WIDTH = 5
+const GRAPH_EPSILON = 0.001
+const ROOM_MIN_AREA = 25
+
 const walls = ref<Wall[]>([])
+const rooms = ref<RoomFace[]>([])
 const selectedWallIndex = ref<number | null>(null)
 const selectedOpeningId = ref<string | null>(null)
 const firstPoint = ref<Point | null>(null)
 const initialPoint = ref<Point | null>(null)
 const mousePos = ref<Point | null>(null)
 
-const wallsPathData = computed(() => {
-  if (walls.value.length === 0) return ''
-  
-  let path = ''
-  let currentEnd: Point | null = null
-  
-  walls.value.forEach((wall) => {
-    // Si le point de départ du mur actuel n'est pas le point d'arrivée du précédent, on fait un MoveTo
-    if (!currentEnd || wall.start.x !== currentEnd.x || wall.start.y !== currentEnd.y) {
-      path += `M ${wall.start.x} ${wall.start.y} `
-    }
-    // LineTo vers le point d'arrivée
-    path += `L ${wall.end.x} ${wall.end.y} `
-    currentEnd = wall.end
-  })
-  
-  return path.trim()
-})
+const wallsPathData = computed(() => walls.value.map(wall => `M ${wall.start.x} ${wall.start.y} L ${wall.end.x} ${wall.end.y}`).join(' '))
 
 const isSnapped = computed(() => {
   if (!mousePos.value || !initialPoint.value || !firstPoint.value) return false
@@ -99,6 +95,10 @@ const isDoorSelectionMode = computed(() => {
   )
 })
 
+const isRoomSelectionMode = computed(() => {
+  return ['measure'].includes(selectedTool.value) && sidebarSelectedTool.value === 'wall'
+})
+
 const isBayWindowMode = computed(() => {
   return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'window-bay'
 })
@@ -127,12 +127,56 @@ const getSvgPoint = (event: MouseEvent | Touch): Point => {
   return { x, y }
 }
 
+const getSnapPoint = (point: Point): Point => {
+  let snappedPoint = { ...point }
+  let minDistance = SNAP_TOLERANCE
+
+  walls.value.forEach(wall => {
+    // Distance au point de départ du mur
+    const dStart = Math.sqrt(Math.pow(point.x - wall.start.x, 2) + Math.pow(point.y - wall.start.y, 2))
+    if (dStart < minDistance) {
+      minDistance = dStart
+      snappedPoint = { ...wall.start }
+    }
+    // Distance au point d'arrivée du mur
+    const dEnd = Math.sqrt(Math.pow(point.x - wall.end.x, 2) + Math.pow(point.y - wall.end.y, 2))
+    if (dEnd < minDistance) {
+      minDistance = dEnd
+      snappedPoint = { ...wall.end }
+    }
+
+    // Snapping sur le segment du mur (projection orthogonale)
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const wallLengthSquared = dx * dx + dy * dy
+    if (wallLengthSquared > 0) {
+      // Calcul du paramètre t de la projection sur la droite infinie
+      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / wallLengthSquared
+      // On ne considère que la partie sur le segment
+      if (t > 0 && t < 1) {
+        const projection = {
+          x: wall.start.x + t * dx,
+          y: wall.start.y + t * dy
+        }
+        const dProj = Math.sqrt(Math.pow(point.x - projection.x, 2) + Math.pow(point.y - projection.y, 2))
+        if (dProj < minDistance) {
+          minDistance = dProj
+          snappedPoint = projection
+        }
+      }
+    }
+  })
+
+  return snappedPoint
+}
+
 const isResizeMode = computed(() => {
-  return selectedTool.value === 'resize' && (sidebarSelectedTool.value === 'window-bay')
+  return selectedTool.value === 'resize' && (['window-bay', 'wall'].includes(sidebarSelectedTool.value!))
 })
 
 const isDragging = ref(false)
 const isResizing = ref<'left' | 'right' | null>(null)
+const isResizingWall = ref<'start' | 'end' | null>(null)
 const panX = ref(0)
 const panY = ref(0)
 const lastMouseX = ref(0)
@@ -192,11 +236,434 @@ onUnmounted(() => {
   drawingZoneRef.value?.removeEventListener('wheel', onWheel)
 })
 
-const SNAP_TOLERANCE = 1.0 // Unité SVG (environ 1m dans la config actuelle)
+const SNAP_TOLERANCE = 3.0 // Unité SVG (environ 3m dans la config actuelle, couvre l'épaisseur visuelle du mur de 5 unités)
+
+const ROOM_ATTACH_TOLERANCE = WALL_STROKE_WIDTH / 2 + SNAP_TOLERANCE
+
+interface SegmentProjection {
+  point: Point;
+  t: number;
+  distance: number;
+}
+
+interface GraphVertex {
+  id: string;
+  point: Point;
+  outgoing: GraphHalfEdge[];
+}
+
+interface GraphHalfEdge {
+  id: string;
+  from: string;
+  to: string;
+  angle: number;
+  twinId: string;
+  visited: boolean;
+}
+
+const distanceBetween = (a: Point, b: Point) => {
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
+
+const almostEqual = (a: number, b: number, epsilon = GRAPH_EPSILON) => {
+  return Math.abs(a - b) <= epsilon
+}
+
+const pointsEqual = (a: Point, b: Point, epsilon = GRAPH_EPSILON) => {
+  return almostEqual(a.x, b.x, epsilon) && almostEqual(a.y, b.y, epsilon)
+}
+
+const pointKey = (point: Point, epsilon = GRAPH_EPSILON) => {
+  return `${Math.round(point.x / epsilon)}:${Math.round(point.y / epsilon)}`
+}
+
+const polygonSignedArea = (points: Point[]) => {
+  let area = 0
+
+  for (let i = 0; i < points.length; i++) {
+    const current = points[i]!
+    const next = points[(i + 1) % points.length]!
+    area += current.x * next.y - next.x * current.y
+  }
+
+  return area / 2
+}
+
+const projectPointOnSegment = (point: Point, start: Point, end: Point): SegmentProjection => {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+
+  if (lengthSquared === 0) {
+    return {
+      point: { ...start },
+      t: 0,
+      distance: distanceBetween(point, start),
+    }
+  }
+
+  let t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+  t = Math.max(0, Math.min(1, t))
+
+  const projectedPoint = {
+    x: start.x + dx * t,
+    y: start.y + dy * t,
+  }
+
+  return {
+    point: projectedPoint,
+    t,
+    distance: distanceBetween(point, projectedPoint),
+  }
+}
+
+const segmentIntersection = (
+    a1: Point,
+    a2: Point,
+    b1: Point,
+    b2: Point,
+    epsilon = GRAPH_EPSILON,
+): Point | null => {
+  const dax = a2.x - a1.x
+  const day = a2.y - a1.y
+  const dbx = b2.x - b1.x
+  const dby = b2.y - b1.y
+
+  const denominator = dax * dby - day * dbx
+  if (Math.abs(denominator) <= epsilon) return null
+
+  const s = ((a1.x - b1.x) * dby - (a1.y - b1.y) * dbx) / denominator
+  const t = ((a1.x - b1.x) * day - (a1.y - b1.y) * dax) / denominator
+
+  if (s < -epsilon || s > 1 + epsilon || t < -epsilon || t > 1 + epsilon) {
+    return null
+  }
+
+  return {
+    x: a1.x + s * dax,
+    y: a1.y + s * day,
+  }
+}
+
+const snapPointToWalls = (point: Point) => {
+  let snappedPoint = point
+  let bestDistance = ROOM_ATTACH_TOLERANCE
+
+  for (const wall of walls.value) {
+    const projection = projectPointOnSegment(point, wall.start, wall.end)
+
+    if (projection.distance < bestDistance) {
+      bestDistance = projection.distance
+      snappedPoint = projection.point
+    }
+  }
+
+  return snappedPoint
+}
+
+const uniqueOrderedPoints = (points: Point[]) => {
+  const result: Point[] = []
+
+  for (const point of points) {
+    const last = result[result.length - 1]
+    if (!last || !pointsEqual(last, point)) {
+      result.push(point)
+    }
+  }
+
+  if (result.length > 1 && pointsEqual(result[0]!, result[result.length - 1]!)) {
+    result.pop()
+  }
+
+  return result
+}
+
+const normalizeFaceKey = (points: Point[]) => {
+  const keys = points.map((point) => pointKey(point))
+  if (keys.length === 0) return ''
+
+  const rotations: string[] = []
+
+  for (let i = 0; i < keys.length; i++) {
+    rotations.push([...keys.slice(i), ...keys.slice(0, i)].join('|'))
+  }
+
+  const reversed = [...keys].reverse()
+  for (let i = 0; i < reversed.length; i++) {
+    rotations.push([...reversed.slice(i), ...reversed.slice(0, i)].join('|'))
+  }
+
+  rotations.sort()
+  return rotations[0]!
+}
+
+const seededRoomColor = (seed: string) => {
+  let hash = 0
+
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0
+  }
+
+  const hue = Math.abs(hash) % 360
+  return `hsla(${hue}, 75%, 65%, 0.35)`
+}
+
+const buildSplitParametersForWall = (wall: Wall, allWalls: Wall[]) => {
+  const parameters = [0, 1]
+
+  for (const otherWall of allWalls) {
+    if (otherWall.id !== wall.id) {
+      const intersection = segmentIntersection(wall.start, wall.end, otherWall.start, otherWall.end)
+
+      if (intersection) {
+        const projectedIntersection = projectPointOnSegment(intersection, wall.start, wall.end)
+        parameters.push(projectedIntersection.t)
+      }
+    }
+
+    const startProjection = projectPointOnSegment(otherWall.start, wall.start, wall.end)
+    if (startProjection.distance <= GRAPH_EPSILON) {
+      parameters.push(startProjection.t)
+    }
+
+    const endProjection = projectPointOnSegment(otherWall.end, wall.start, wall.end)
+    if (endProjection.distance <= GRAPH_EPSILON) {
+      parameters.push(endProjection.t)
+    }
+  }
+
+  return [...new Set(parameters.map((value) => Number(value.toFixed(6))))].sort((a, b) => a - b)
+}
+
+const buildRoomFaces = (inputWalls: Wall[]): RoomFace[] => {
+  if (inputWalls.length < 3) return []
+
+  const splitSegments: Array<{ start: Point; end: Point }> = []
+
+  for (const wall of inputWalls) {
+    const splitParameters = buildSplitParametersForWall(wall, inputWalls)
+
+    for (let i = 0; i < splitParameters.length - 1; i++) {
+      const t1 = splitParameters[i]!
+      const t2 = splitParameters[i + 1]!
+
+      const start = {
+        x: wall.start.x + (wall.end.x - wall.start.x) * t1,
+        y: wall.start.y + (wall.end.y - wall.start.y) * t1,
+      }
+
+      const end = {
+        x: wall.start.x + (wall.end.x - wall.start.x) * t2,
+        y: wall.start.y + (wall.end.y - wall.start.y) * t2,
+      }
+
+      if (distanceBetween(start, end) > GRAPH_EPSILON) {
+        splitSegments.push({ start, end })
+      }
+    }
+  }
+
+  const vertices = new Map<string, GraphVertex>()
+  const edges = new Map<string, GraphHalfEdge>()
+  let edgeIndex = 0
+
+  const ensureVertex = (point: Point) => {
+    const id = pointKey(point)
+    const existing = vertices.get(id)
+
+    if (existing) return existing
+
+    const created: GraphVertex = {
+      id,
+      point,
+      outgoing: [],
+    }
+
+    vertices.set(id, created)
+    return created
+  }
+
+  for (const segment of splitSegments) {
+    const fromVertex = ensureVertex(segment.start)
+    const toVertex = ensureVertex(segment.end)
+
+    if (fromVertex.id === toVertex.id) continue
+
+    const forwardId = `edge-${edgeIndex++}`
+    const backwardId = `edge-${edgeIndex++}`
+
+    const forward: GraphHalfEdge = {
+      id: forwardId,
+      from: fromVertex.id,
+      to: toVertex.id,
+      angle: Math.atan2(toVertex.point.y - fromVertex.point.y, toVertex.point.x - fromVertex.point.x),
+      twinId: backwardId,
+      visited: false,
+    }
+
+    const backward: GraphHalfEdge = {
+      id: backwardId,
+      from: toVertex.id,
+      to: fromVertex.id,
+      angle: Math.atan2(fromVertex.point.y - toVertex.point.y, fromVertex.point.x - toVertex.point.x),
+      twinId: forwardId,
+      visited: false,
+    }
+
+    edges.set(forward.id, forward)
+    edges.set(backward.id, backward)
+
+    fromVertex.outgoing.push(forward)
+    toVertex.outgoing.push(backward)
+  }
+
+  for (const vertex of vertices.values()) {
+    vertex.outgoing.sort((a, b) => a.angle - b.angle)
+  }
+
+  const rawFaces: Array<{ key: string; points: Point[]; area: number }> = []
+
+  for (const edge of edges.values()) {
+    if (edge.visited) continue
+
+    const facePoints: Point[] = []
+    let currentEdge: GraphHalfEdge | undefined = edge
+    let safety = 0
+
+    while (currentEdge && safety < 10_000) {
+      safety++
+      currentEdge.visited = true
+
+      const fromVertex = vertices.get(currentEdge.from)
+      const toVertex = vertices.get(currentEdge.to)
+      const twin = edges.get(currentEdge.twinId)
+
+      if (!fromVertex || !toVertex || !twin) break
+
+      facePoints.push(fromVertex.point)
+
+      const outgoing = toVertex.outgoing
+      const twinIndex = outgoing.findIndex((outgoingEdge) => outgoingEdge.id === twin.id)
+
+      if (twinIndex === -1) break
+
+      const nextIndex = (twinIndex - 1 + outgoing.length) % outgoing.length
+      currentEdge = outgoing[nextIndex]!
+
+      if (currentEdge.id === edge.id) {
+        break
+      }
+    }
+
+    const simplifiedPoints = uniqueOrderedPoints(facePoints)
+
+    if (simplifiedPoints.length < 3) continue
+
+    const area = polygonSignedArea(simplifiedPoints)
+    if (Math.abs(area) < ROOM_MIN_AREA) continue
+
+    rawFaces.push({
+      key: normalizeFaceKey(simplifiedPoints),
+      points: simplifiedPoints,
+      area,
+    })
+  }
+
+  const deduplicatedFaces = Array.from(
+      rawFaces.reduce((map, face) => {
+        if (!map.has(face.key)) {
+          map.set(face.key, face)
+        }
+        return map
+      }, new Map<string, { key: string; points: Point[]; area: number }>() ).values()
+  )
+
+  if (deduplicatedFaces.length === 0) return []
+
+  const outerFace = deduplicatedFaces.reduce((largest, current) => {
+    return Math.abs(current.area) > Math.abs(largest.area) ? current : largest
+  })
+
+  return deduplicatedFaces
+      .filter((face) => face.key !== outerFace.key)
+      .map((face) => ({
+        id: face.key,
+        points: face.points,
+        area: Math.abs(face.area),
+        color: seededRoomColor(face.key),
+      }))
+}
 
 const onMouseDown = (event: MouseEvent) => {
+  if (isRoomSelectionMode.value) {
+    clearRoomSelection()
+  }
+
+  if (isResizeMode.value) {
+    const point = snapPointToWalls(getSvgPoint(event))
+    const threshold = 15 / zoom.value
+
+    // 1. D'abord, vérifier si on clique sur une extrémité du mur sélectionné
+    if (selectedWallIndex.value !== null) {
+      const wall = walls.value[selectedWallIndex.value]
+      if (wall) {
+        const dStart = Math.sqrt(Math.pow(point.x - wall.start.x, 2) + Math.pow(point.y - wall.start.y, 2))
+        const dEnd = Math.sqrt(Math.pow(point.x - wall.end.x, 2) + Math.pow(point.y - wall.end.y, 2))
+
+        if (dStart < threshold) {
+          isResizingWall.value = 'start'
+          return
+        } else if (dEnd < threshold) {
+          isResizingWall.value = 'end'
+          return
+        }
+      }
+    }
+
+    // 2. Ensuite, vérifier les ouvertures (logique existante)
+    let minDistance = Infinity
+    let closestOpeningId = null
+    let handle = null
+
+    walls.value.forEach((wall) => {
+      wall.openings.forEach((opening) => {
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const wallLength = Math.sqrt(dx * dx + dy * dy)
+        if (wallLength === 0) return
+
+        // Points de redimensionnement de l'ouverture
+        const ox = wall.start.x + dx * opening.position
+        const oy = wall.start.y + dy * opening.position
+        const ex = ox + (dx / wallLength) * opening.width
+        const ey = oy + (dy / wallLength) * opening.width
+
+        const dLeft = Math.sqrt(Math.pow(point.x - ox, 2) + Math.pow(point.y - oy, 2))
+        const dRight = Math.sqrt(Math.pow(point.x - ex, 2) + Math.pow(point.y - ey, 2))
+
+        if (dLeft < threshold && dLeft < minDistance) {
+          minDistance = dLeft
+          closestOpeningId = opening.id
+          handle = 'left'
+        }
+        if (dRight < threshold && dRight < minDistance) {
+          minDistance = dRight
+          closestOpeningId = opening.id
+          handle = 'right'
+        }
+      })
+    })
+
+    if (closestOpeningId) {
+      selectedOpeningId.value = closestOpeningId
+      isResizing.value = handle as unknown as 'left' | 'right'
+      return
+    }
+  }
+
   if (isDrawingMode.value) {
-    let point = getSvgPoint(event)
+    const rawPoint = getSvgPoint(event)
+    const point = snapPointToWalls(rawPoint)
     
     // Vérouillage directionnel (orthogonal) si Ctrl est enfoncé
     if (event.ctrlKey && firstPoint.value) {
@@ -228,12 +695,14 @@ const onMouseDown = (event: MouseEvent) => {
     }
 
     if (!firstPoint.value) {
-      const point = getSvgPoint(event)
+      const rawPoint = getSvgPoint(event)
+      const point = getSnapPoint(rawPoint)
       firstPoint.value = point
       initialPoint.value = point
       mousePos.value = point
     } else {
-      const point = getSvgPoint(event)
+      const rawPoint = getSvgPoint(event)
+      const point = getSnapPoint(rawPoint)
       walls.value.push({
         id: crypto.randomUUID(),
         start: firstPoint.value,
@@ -274,7 +743,7 @@ const onMouseDown = (event: MouseEvent) => {
     })
 
     if (closestWallIndex !== null && minDistance < threshold) {
-      const wall = walls.value[closestWallIndex]
+      const wall = walls.value[closestWallIndex]!
       const dx = wall.end.x - wall.start.x
       const dy = wall.end.y - wall.start.y
       const l2 = dx * dx + dy * dy
@@ -383,6 +852,26 @@ const onMouseDown = (event: MouseEvent) => {
 }
 
 const onMouseMove = (event: MouseEvent) => {
+  if (isResizingWall.value && selectedWallIndex.value !== null) {
+    const rawPoint = getSvgPoint(event)
+    const point = getSnapPoint(rawPoint)
+    const wall = walls.value[selectedWallIndex.value]
+    if (wall) {
+      const oldPoint = isResizingWall.value === 'start' ? { ...wall.start } : { ...wall.end }
+      
+      // Mettre à jour tous les murs qui partagent ce point
+      walls.value.forEach(w => {
+        if (w.start.x === oldPoint.x && w.start.y === oldPoint.y) {
+          w.start = { ...point }
+        }
+        if (w.end.x === oldPoint.x && w.end.y === oldPoint.y) {
+          w.end = { ...point }
+        }
+      })
+    }
+    return
+  }
+
   if (isResizing.value && selectedOpeningId.value) {
     const point = getSvgPoint(event)
     
@@ -390,7 +879,7 @@ const onMouseMove = (event: MouseEvent) => {
     for (const wall of walls.value) {
       const openingIndex = wall.openings.findIndex(o => o.id === selectedOpeningId.value)
       if (openingIndex !== -1) {
-        const opening = wall.openings[openingIndex]
+        const opening = wall.openings[openingIndex]!
         const dx = wall.end.x - wall.start.x
         const dy = wall.end.y - wall.start.y
         const wallLength = Math.sqrt(dx * dx + dy * dy)
@@ -422,7 +911,8 @@ const onMouseMove = (event: MouseEvent) => {
   }
 
   if (isDrawingMode.value && firstPoint.value) {
-    let point = getSvgPoint(event)
+    const rawPoint = getSvgPoint(event)
+    const point = getSnapPoint(rawPoint)
     
     // Vérouillage directionnel (orthogonal) si Ctrl est enfoncé
     if (event.ctrlKey) {
@@ -465,6 +955,7 @@ const onMouseMove = (event: MouseEvent) => {
 const onMouseUp = () => {
   isDragging.value = false
   isResizing.value = null
+  isResizingWall.value = null
 }
 
 const onTouchStart = (event: TouchEvent) => {
@@ -478,6 +969,25 @@ const onTouchStart = (event: TouchEvent) => {
 }
 
 const onTouchMove = (event: TouchEvent) => {
+  if (isResizingWall.value && selectedWallIndex.value !== null) {
+    const rawPoint = getSvgPoint(event.touches[0]!)
+    const point = getSnapPoint(rawPoint)
+    const wall = walls.value[selectedWallIndex.value]
+    if (wall) {
+      const oldPoint = isResizingWall.value === 'start' ? { ...wall.start } : { ...wall.end }
+      
+      walls.value.forEach(w => {
+        if (w.start.x === oldPoint.x && w.start.y === oldPoint.y) {
+          w.start = { ...point }
+        }
+        if (w.end.x === oldPoint.x && w.end.y === oldPoint.y) {
+          w.end = { ...point }
+        }
+      })
+    }
+    return
+  }
+
   if (isResizing.value && selectedOpeningId.value) {
     const point = getSvgPoint(event.touches[0]!)
     
@@ -485,7 +995,7 @@ const onTouchMove = (event: TouchEvent) => {
     for (const wall of walls.value) {
       const openingIndex = wall.openings.findIndex(o => o.id === selectedOpeningId.value)
       if (openingIndex !== -1) {
-        const opening = wall.openings[openingIndex]
+        const opening = wall.openings[openingIndex]!
         const dx = wall.end.x - wall.start.x
         const dy = wall.end.y - wall.start.y
         const wallLength = Math.sqrt(dx * dx + dy * dy)
@@ -565,7 +1075,11 @@ const cursorStyle = computed(() => {
   if (isDrawingMode.value) return 'crosshair'
   if (isDoorMode.value || isDoubleDoorMode.value || isWindowMode.value || isDoubleWindowMode.value || isBayWindowMode.value) return 'copy'
   if (isSelectionMode.value || isDoorSelectionMode.value) return 'pointer'
-  if (selectedTool.value === 'resize' && selectedOpeningId.value) return resizeCursorStyle.value
+  if (selectedTool.value === 'resize') {
+    if (selectedOpeningId.value) return resizeCursorStyle.value
+    if (isResizingWall.value) return 'move'
+    return 'default'
+  }
   if (selectedTool.value === 'move') {
     return isDragging.value ? 'grabbing' : 'grab'
   }
@@ -676,6 +1190,12 @@ const selectedWallMeasurementLines = computed(() => {
     }
   ]
 })
+
+watch(
+    walls,
+    (nextWalls) => rooms.value = buildRoomFaces(nextWalls),
+    { deep: true, immediate: true }
+)
 </script>
 
 <template>
@@ -714,18 +1234,35 @@ const selectedWallMeasurementLines = computed(() => {
       >
         <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#grid)" />
 
+
+        <polygon
+            v-for="room in rooms"
+            :key="room.id"
+            :points="room.points.map(point => `${point.x},${point.y}`).join(' ')"
+            :fill="selectedRoomIds.includes(room.id) ? '#ffeb3b' : 'transparent'"
+            :fill-opacity="selectedRoomIds.includes(room.id) ? 0.8 : 0"
+            stroke="none"
+            pointer-events="all"
+            :style="{ cursor: isRoomSelectionMode ? 'pointer' : undefined }"
+            @click.prevent.stop="(event: MouseEvent) => {
+              if (isRoomSelectionMode) {
+                toggleRoomSelection(room.id, room.area, event.ctrlKey)
+              }
+            }"
+            @touchstart.stop="() => { if (isRoomSelectionMode) toggleRoomSelection(room.id, room.area, false) }"
+        />
+
         <!-- Murs fixés -->
-        <g v-for="wall in walls" :key="wall.id">
-          <line
-            :x1="wall.start.x"
-            :y1="wall.start.y"
-            :x2="wall.end.x"
-            :y2="wall.end.y"
-            stroke="black"
-            stroke-width="5"
-            stroke-linecap="round"
-          />
-          <!-- Portes -->
+        <path
+          :d="wallsPathData"
+          stroke="black"
+          :stroke-width="WALL_STROKE_WIDTH"
+          stroke-linecap="round"
+          fill="none"
+        />
+
+        <!-- Ouvertures -->
+        <g v-for="wall in walls" :key="`openings-${wall.id}`">
           <g v-for="opening in wall.openings" :key="opening.id">
             <g v-if="opening.type === 'door'" :transform="getOpeningTransform(wall, opening)">
               <!-- L'ouverture dans le mur -->
@@ -868,20 +1405,26 @@ const selectedWallMeasurementLines = computed(() => {
             :x2="selectedWall.end.x"
             :y2="selectedWall.end.y"
             stroke="orange"
-            stroke-width="5"
+            :stroke-width="WALL_STROKE_WIDTH"
             stroke-linecap="round"
           />
           <circle
             :cx="selectedWall.start.x"
             :cy="selectedWall.start.y"
-            :r="6"
-            fill="orange"
+            :r="isResizeMode ? 8 : 6"
+            :fill="isResizeMode ? 'white' : 'orange'"
+            :stroke="isResizeMode ? 'orange' : 'none'"
+            :stroke-width="isResizeMode ? 2 : 0"
+            :style="{ cursor: isResizeMode ? 'move' : 'default' }"
           />
           <circle
             :cx="selectedWall.end.x"
             :cy="selectedWall.end.y"
-            :r="6"
-            fill="orange"
+            :r="isResizeMode ? 8 : 6"
+            :fill="isResizeMode ? 'white' : 'orange'"
+            :stroke="isResizeMode ? 'orange' : 'none'"
+            :stroke-width="isResizeMode ? 2 : 0"
+            :style="{ cursor: isResizeMode ? 'move' : 'default' }"
           />
           <!-- Flèches en pointillés avec distance (doubles) -->
           <line
@@ -917,7 +1460,7 @@ const selectedWallMeasurementLines = computed(() => {
           :x2="mousePos.x"
           :y2="mousePos.y"
           stroke="blue"
-          stroke-width="5"
+          :stroke-width="WALL_STROKE_WIDTH"
           stroke-dasharray="5,5"
           stroke-linecap="round"
         />
