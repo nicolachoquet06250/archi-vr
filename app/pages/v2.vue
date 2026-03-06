@@ -14,7 +14,8 @@ const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
 const { viewMode } = useViewMode()
 const { isMenuOpen, isPropertiesOpen, toggleMenu, toggleProperties, closeAll: closeSidebar } = useSidebar()
-const { selectedRoomIds, totalSelectedArea, clearRoomSelection } = useRoomSelection()
+const { selectedRoomIds, totalSelectedArea, clearRoomSelection, isRoomSelectionMode } = useRoomSelection()
+const { selectedWallId, selectedWallLength, selectedWallHeight } = useWallSelection()
 const { isWallsMenuOpen, isDoorsMenuOpen, isWindowsMenuOpen, isStairsMenuOpen, handleWallsSelect, handleDoorsSelect, handleWindowsSelect, handleStairsSelect, closeAllSubMenus, selectedTool, selectTool } = useToolbarMenu()
 
 const mainZone = ref<HTMLElement | null>(null)
@@ -22,6 +23,12 @@ const menuZoneRef = ref<HTMLElement | null>(null)
 const propertiesZoneRef = ref<HTMLElement | null>(null)
 const mainZoneWidth = ref(0)
 const isCompact = computed(() => mainZoneWidth.value < 1100) // 700 (buildZone) + 200 (menu) + 200 (properties)
+
+watch(selectedWallId, (newId) => {
+  if (newId) {
+    isPropertiesOpen.value = true
+  }
+})
 
 const handleClickOutside = (event: MouseEvent) => {
   if (!isCompact.value) return
@@ -35,6 +42,7 @@ const handleClickOutside = (event: MouseEvent) => {
   if (isPropertiesOpen.value && propertiesZoneRef.value && !propertiesZoneRef.value.contains(target)) {
     isPropertiesOpen.value = false
     clearRoomSelection()
+    selectedWallId.value = null
   }
 }
 
@@ -330,6 +338,23 @@ onUnmounted(() => {
           <label>{{ selectedRoomIds.length > 1 ? 'Superficie totale :' : 'Superficie de la pièce :' }}</label>
           <span>{{ (totalSelectedArea / 100).toFixed(2) }} m²</span>
         </div>
+
+        <div v-if="selectedWallId" style="border-top: 1px solid #3a3f42; padding-top: 15px; margin-top: 15px;">
+          <div :class="$style.propertyItem">
+            <label>Longueur du mur :</label>
+            <span>{{ selectedWallLength.toFixed(2) }} m</span>
+          </div>
+          <div :class="$style.propertyItem">
+            <label>Hauteur du mur (m) :</label>
+            <input 
+              type="number" 
+              v-model="selectedWallHeight" 
+              step="0.1" 
+              min="0"
+              style="width: 100%; background-color: #3a3f42; border: 1px solid #4a4f52; color: #ffffff; padding: 5px 8px; border-radius: 4px; font-size: 14px; outline: none;"
+            />
+          </div>
+        </div>
       </div>
     </aside>
   </main>
@@ -478,6 +503,27 @@ onUnmounted(() => {
     font-size: 16px;
     font-weight: bold;
   }
+}
+
+.numberInput {
+  width: 100%;
+  background-color: #3a3f42;
+  border: 1px solid #4a4f52;
+  color: #ffffff;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+
+  &:focus {
+    border-color: #3a80b6;
+  }
+}
+
+.propertyGroup {
+  border-top: 1px solid #3a3f42;
+  padding-top: 15px;
+  margin-top: 15px;
 }
 
 .toggleIcon {

@@ -10,13 +10,22 @@ const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const moveSpeed = 400.0; // Vitesse de déplacement augmentée
 
-// Constantes pour l'altitude de la caméra
-const CAMERA_HEIGHT = 17;
+// Facteur de conversion pour que 1 mètre = 10 unités 3D (cohérent avec GRID_SECONDARY_UNIT_SIZE)
+const SCALE_FACTOR = 10;
+const HUMAN_EYE_HEIGHT_RATIO = 1.6 / 2.5; // Environ 1.6m pour un mur de 2.5m
 
 const props = defineProps<{
   walls: any[];
   rooms: any[];
 }>();
+
+// Hauteur de la caméra calculée dynamiquement
+const cameraHeight = computed(() => {
+  if (props.walls.length === 0) return 1.7 * SCALE_FACTOR;
+  // On prend la hauteur du premier mur (ou du mur sélectionné s'il y en avait un de passé en prop)
+  const baseHeight = props.walls[0].height || 2.5;
+  return baseHeight * HUMAN_EYE_HEIGHT_RATIO * SCALE_FACTOR;
+});
 
 const container = ref<HTMLElement | null>(null);
 let scene: THREE.Scene;
@@ -33,10 +42,10 @@ const init = () => {
 
   // Camera
   camera = new THREE.PerspectiveCamera(75, container.value.clientWidth / container.value.clientHeight, 0.1, 5000);
-  camera.position.set(0, CAMERA_HEIGHT, 0); 
+  camera.position.set(0, cameraHeight.value, 0); 
   
   // On s'assure qu'on regarde l'horizon dès le début
-  const initialLookAt = new THREE.Vector3(1, CAMERA_HEIGHT, 0);
+  const initialLookAt = new THREE.Vector3(1, cameraHeight.value, 0);
   camera.lookAt(initialLookAt);
 
   // Renderer
@@ -124,7 +133,6 @@ const updateScene = () => {
 
   props.walls.forEach(wall => {
     // Les coordonnées 2D (x, y) deviennent (x, z) en 3D (Y est la hauteur)
-    // On garde le décalage de -500 cohérent avec le SVG si nécessaire
     const startX = wall.start.x - 500;
     const startZ = wall.start.y - 500;
     const endX = wall.end.x - 500;
@@ -135,33 +143,133 @@ const updateScene = () => {
     maxX = Math.max(maxX, startX, endX);
     maxZ = Math.max(maxZ, startZ, endZ);
 
-    const start = new THREE.Vector3(startX, 0, startZ);
-    const end = new THREE.Vector3(endX, 0, endZ);
+    const start = new THREE.Vector2(startX, startZ);
+    const end = new THREE.Vector2(endX, endZ);
     
-    const distance = start.distanceTo(end);
-    const geometry = new THREE.BoxGeometry(distance, 25, 5); // 25 units height
+    // Trouver les murs connectés à start et end
+    const connectedAtStart = props.walls.filter(w => 
+      w.id !== wall.id && 
+      (Math.abs(w.start.x - wall.start.x) < 0.1 && Math.abs(w.start.y - wall.start.y) < 0.1 ||
+       Math.abs(w.end.x - wall.start.x) < 0.1 && Math.abs(w.end.y - wall.start.y) < 0.1)
+    );
+    const connectedAtEnd = props.walls.filter(w => 
+      w.id !== wall.id && 
+      (Math.abs(w.start.x - wall.end.x) < 0.1 && Math.abs(w.start.y - wall.end.y) < 0.1 ||
+       Math.abs(w.end.x - wall.end.x) < 0.1 && Math.abs(w.end.y - wall.end.y) < 0.1)
+    );
+
+    const wallThickness = 5;
+    const halfThickness = wallThickness / 2;
+    const wallHeight = (wall.height || 2.5) * SCALE_FACTOR;
+
+    // Direction du mur actuel
+    const dir = new THREE.Vector2().subVectors(end, start).normalize();
+    const normal = new THREE.Vector2(-dir.y, dir.x);
+
+    // Points de base du rectangle du mur (sans mitre)
+    let p1 = start.clone().add(normal.clone().multiplyScalar(halfThickness)); // Start Left
+    let p2 = start.clone().add(normal.clone().multiplyScalar(-halfThickness)); // Start Right
+    let p3 = end.clone().add(normal.clone().multiplyScalar(-halfThickness)); // End Right
+    let p4 = end.clone().add(normal.clone().multiplyScalar(halfThickness)); // End Left
+
+    const getMitrePoint = (p: THREE.Vector2, d1: THREE.Vector2, d2: THREE.Vector2, thickness: number, isLeft: boolean) => {
+      const n1 = new THREE.Vector2(-d1.y, d1.x);
+      const n2 = new THREE.Vector2(-d2.y, d2.x);
+      
+      // On utilise la bissectrice des normales pour la direction du mitre
+      const miterDir = new THREE.Vector2().addVectors(n1, n2).normalize();
+      
+      // Si les murs sont colinéaires (ou presque), la normale moyenne est la normale
+      if (miterDir.length() < 0.01) {
+        return p.clone().add(n1.clone().multiplyScalar(isLeft ? thickness : -thickness));
+      }
+
+      // Calculer la longueur du mitre
+      // La formule est : thickness / cos(angle/2)
+      // On peut l'obtenir avec le produit scalaire entre miterDir et une des normales
+      const dot = miterDir.dot(n1);
+      
+      if (Math.abs(dot) < 0.1) { // Éviter la division par zéro sur des angles extrêmes
+         return p.clone().add(n1.clone().multiplyScalar(isLeft ? thickness : -thickness));
+      }
+      
+      const miterLen = thickness / dot;
+      
+      // Limiter la longueur du mitre pour éviter des pics infinis sur des angles très aigus
+      // (Même si pour des murs normaux ça ne devrait pas arriver)
+      const clampedMiterLen = Math.min(Math.abs(miterLen), thickness * 3) * Math.sign(miterLen);
+      
+      return p.clone().add(miterDir.multiplyScalar(isLeft ? clampedMiterLen : -clampedMiterLen));
+    };
+
+    if (connectedAtStart.length > 0) {
+      const other = connectedAtStart[0];
+      const otherStart = new THREE.Vector2(other.start.x - 500, other.start.y - 500);
+      const otherEnd = new THREE.Vector2(other.end.x - 500, other.end.y - 500);
+      let otherDir: THREE.Vector2;
+      
+      if (Math.abs(other.end.x - wall.start.x) < 0.1 && Math.abs(other.end.y - wall.start.y) < 0.1) {
+        // Le mur 'other' finit là où 'wall' commence
+        otherDir = new THREE.Vector2().subVectors(otherEnd, otherStart).normalize();
+      } else {
+        // Le mur 'other' commence là où 'wall' commence
+        otherDir = new THREE.Vector2().subVectors(otherStart, otherEnd).normalize();
+      }
+      
+      p1 = getMitrePoint(start, otherDir, dir, halfThickness, true);
+      p2 = getMitrePoint(start, otherDir, dir, halfThickness, false);
+    }
+
+    if (connectedAtEnd.length > 0) {
+      const other = connectedAtEnd[0];
+      const otherStart = new THREE.Vector2(other.start.x - 500, other.start.y - 500);
+      const otherEnd = new THREE.Vector2(other.end.x - 500, other.end.y - 500);
+      let otherDir: THREE.Vector2;
+      
+      if (Math.abs(other.start.x - wall.end.x) < 0.1 && Math.abs(other.start.y - wall.end.y) < 0.1) {
+        // Le mur 'other' commence là où 'wall' finit
+        otherDir = new THREE.Vector2().subVectors(otherEnd, otherStart).normalize();
+      } else {
+        // Le mur 'other' finit là où 'wall' finit
+        otherDir = new THREE.Vector2().subVectors(otherStart, otherEnd).normalize();
+      }
+      
+      p3 = getMitrePoint(end, dir, otherDir, halfThickness, false);
+      p4 = getMitrePoint(end, dir, otherDir, halfThickness, true);
+    }
+
+    const shape = new THREE.Shape();
+    shape.moveTo(p1.x, p1.y);
+    shape.lineTo(p2.x, p2.y);
+    shape.lineTo(p3.x, p3.y);
+    shape.lineTo(p4.x, p4.y);
+    shape.closePath();
+
+    const extrudeSettings = {
+      steps: 1,
+      depth: wallHeight,
+      bevelEnabled: false
+    };
+
+    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     const material = new THREE.MeshPhongMaterial({ color: 0xcccccc });
     const mesh = new THREE.Mesh(geometry, material);
     
-    // Position au milieu
-    const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-    mesh.position.set(midpoint.x, 12.5, midpoint.z);
-    
-    // Rotation pour aligner le mur
-    const direction = new THREE.Vector3().subVectors(end, start);
-    const angle = Math.atan2(direction.z, direction.x);
-    mesh.rotation.y = -angle; 
+    // Rotation pour mettre le mur debout (Extrude extrude selon Z, on veut selon Y)
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0; // Le bas du mur est à 0
     
     mesh.userData.type = 'wall';
     scene.add(mesh);
   });
 
-  // Si la caméra est à (0, CAMERA_HEIGHT, 0), on la place au milieu des murs
+  // Si la caméra est à (0, cameraHeight.value, 0), on la place au milieu des murs
   if (camera.position.x === 0 && camera.position.z === 0 && props.walls.length > 0) {
     const centerX = (minX + maxX) / 2;
     const centerZ = (minZ + maxZ) / 2;
-    camera.position.set(centerX, CAMERA_HEIGHT, centerZ);
-    controls.target.set(centerX + 1, CAMERA_HEIGHT, centerZ);
+    const currentCameraHeight = cameraHeight.value;
+    camera.position.set(centerX, currentCameraHeight, centerZ);
+    controls.target.set(centerX + 1, currentCameraHeight, centerZ);
     controls.update();
   }
 };
@@ -200,7 +308,7 @@ const animate = () => {
     camera.position.addScaledVector(camRight, velocity.x * delta);
 
     // Maintenir la caméra à hauteur d'homme
-    camera.position.y = CAMERA_HEIGHT;
+    camera.position.y = cameraHeight.value;
 
     // Mettre à jour la cible d'OrbitControls pour qu'elle suive la caméra.
     // En utilisant getWorldDirection, la cible sera toujours dans l'axe de la vue actuelle,
@@ -268,6 +376,20 @@ const onKeyUp = (event: KeyboardEvent) => {
       break;
   }
 };
+
+watch(() => props.walls, () => {
+  updateScene();
+}, { deep: true });
+
+watch(cameraHeight, (newHeight) => {
+  if (camera) {
+    camera.position.y = newHeight;
+    if (controls) {
+      controls.target.y = newHeight;
+      controls.update();
+    }
+  }
+});
 
 onMounted(() => {
   init();

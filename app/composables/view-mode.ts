@@ -4,7 +4,7 @@ const currentViewMode = ref<ViewMode>('2D');
 
 export const useViewMode = () => {
   return {
-    viewMode: computed(() => currentViewMode.value),
+    viewMode: computed(() => currentViewMode.value.trim()),
     setViewMode: (mode: ViewMode) => {
       currentViewMode.value = mode;
     },
