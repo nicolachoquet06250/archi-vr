@@ -14,7 +14,7 @@ const {showCompass} = useCompass()
 const {toolbarSide} = useToolbar()
 const { isMenuOpen, isPropertiesOpen, toggleMenu, toggleProperties, closeAll: closeSidebar } = useSidebar()
 const { selectedRoomIds, totalSelectedArea, clearRoomSelection } = useRoomSelection()
-const { isDoorsMenuOpen, isWindowsMenuOpen, isStairsMenuOpen, handleDoorsSelect, handleWindowsSelect, handleStairsSelect, closeAllSubMenus, selectedTool, selectTool } = useToolbarMenu()
+const { isWallsMenuOpen, isDoorsMenuOpen, isWindowsMenuOpen, isStairsMenuOpen, handleWallsSelect, handleDoorsSelect, handleWindowsSelect, handleStairsSelect, closeAllSubMenus, selectedTool, selectTool } = useToolbarMenu()
 
 const mainZone = ref<HTMLElement | null>(null)
 const menuZoneRef = ref<HTMLElement | null>(null)
@@ -112,11 +112,40 @@ onUnmounted(() => {
       <div :class="$style.content">
         <ul :class="$style.menuList">
           <li
-              :class="[$style.menuItem, isActive('wall')]"
-              @click="selectTool('wall')"
+              :class="[
+                  $style.menuItem,
+                  $style.expandable,
+                  isPossibleActive([
+                      'wall', 'wall-flat',
+                      'wall-round'
+                  ]),
+                  { [$style.expanded]: isWallsMenuOpen }
+              ]"
+              @click="handleWallsSelect(isCompact)"
           >
-            <WallIcon :size="20" />
-            <span v-show="!isCompact || isMenuOpen">Walls</span>
+            <div :class="$style.menuItemMain">
+              <WallIcon :size="20" />
+              <span v-show="!isCompact || isMenuOpen">Walls</span>
+              <ChevronIcon
+                  v-show="!isCompact || isMenuOpen"
+                  :size="12"
+                  :class="[$style.chevron, { [$style.expanded]: isWallsMenuOpen }]"
+              />
+            </div>
+
+            <Transition name="expand">
+              <ul v-show="isWallsMenuOpen && (!isCompact || isMenuOpen)" :class="$style.subMenu" @click.stop>
+                <li :class="[$style.subMenuItem, isActive('wall-flat')]" @click="selectTool('wall-flat')">
+                  <WallIcon :size="18" />
+                  <span>Flat wall</span>
+                </li>
+
+                <li :class="[$style.subMenuItem, isActive('wall-round')]" @click="selectTool('wall-round')">
+                  <WallIcon :size="18" />
+                  <span>Round wall</span>
+                </li>
+              </ul>
+            </Transition>
           </li>
 
           <li

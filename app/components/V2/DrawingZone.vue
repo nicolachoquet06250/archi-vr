@@ -16,6 +16,7 @@ interface Wall {
   start: Point;
   end: Point;
   openings: Opening[];
+  groupId?: string;
 }
 
 interface Opening {
@@ -35,14 +36,16 @@ interface RoomFace {
 }
 
 const WALL_STROKE_WIDTH = 5
-const GRAPH_EPSILON = 0.001
-const ROOM_MIN_AREA = 25
+const GRAPH_EPSILON = 0.5
+const ROOM_MIN_AREA = 100 // Augmenté pour éviter les micro-pièces dues aux arrondis
 
 const walls = ref<Wall[]>([])
 const rooms = ref<RoomFace[]>([])
-const selectedWallIndex = ref<number | null>(null)
+const selectedWallIndices = ref<number[]>([])
 const selectedOpeningId = ref<string | null>(null)
 const firstPoint = ref<Point | null>(null)
+const curvePoint1 = ref<Point | null>(null)
+const curvePoint2 = ref<Point | null>(null)
 const initialPoint = ref<Point | null>(null)
 const mousePos = ref<Point | null>(null)
 
@@ -52,6 +55,77 @@ const isSnapped = computed(() => {
   if (!mousePos.value || !initialPoint.value || !firstPoint.value) return false
   return mousePos.value.x === initialPoint.value.x && mousePos.value.y === initialPoint.value.y
 })
+
+const arcSegments = computed(() => {
+  if (!isWallRoundMode.value || !firstPoint.value || !curvePoint1.value || !mousePos.value) return []
+  
+  if (curvePoint2.value) {
+    // Si on a les 4 points, on utilise la courbe cubique
+    return generateArcSegments(firstPoint.value, curvePoint1.value, curvePoint2.value, mousePos.value)
+  } else {
+    // Sinon, on utilise une courbe quadratique pour la prévisualisation du 3ème point
+    return generateArcSegmentsQuadratic(firstPoint.value, curvePoint1.value, mousePos.value)
+  }
+})
+
+const generateArcSegmentsQuadratic = (start: Point, end: Point, control: Point): { start: Point, end: Point }[] => {
+  const segments: { start: Point, end: Point }[] = []
+  const dist = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2))
+  const numSegments = Math.max(5, Math.min(30, Math.floor(dist / 2)))
+
+  let lastPoint = { ...start }
+  for (let i = 1; i <= numSegments; i++) {
+    const t = i / numSegments
+
+    const getBezierPoint = (t: number) => {
+      const x = (1 - t) * (1 - t) * start.x + 2 * (1 - t) * t * control.x + t * t * end.x
+      const y = (1 - t) * (1 - t) * start.y + 2 * (1 - t) * t * control.y + t * t * end.y
+      return { x, y }
+    }
+
+    const currentPoint = i === numSegments ? { ...end } : getBezierPoint(t)
+    segments.push({
+      start: lastPoint,
+      end: currentPoint
+    })
+    lastPoint = currentPoint
+  }
+  return segments
+}
+
+const generateArcSegments = (start: Point, end: Point, control1: Point, control2: Point): { start: Point, end: Point }[] => {
+  const segments: { start: Point, end: Point }[] = []
+  
+  // Calculer la distance entre start et end pour adapter le nombre de segments
+  const dist = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2))
+  const numSegments = Math.max(5, Math.min(30, Math.floor(dist / 2)))
+
+  // On utilise une courbe de Bézier cubique pour simuler l'arrondi avec 4 points
+  let lastPoint = { ...start }
+  for (let i = 1; i <= numSegments; i++) {
+    const t = i / numSegments
+
+    const getBezierPoint = (t: number) => {
+      const x = Math.pow(1 - t, 3) * start.x + 
+                3 * Math.pow(1 - t, 2) * t * control1.x + 
+                3 * (1 - t) * Math.pow(t, 2) * control2.x + 
+                Math.pow(t, 3) * end.x
+      const y = Math.pow(1 - t, 3) * start.y + 
+                3 * Math.pow(1 - t, 2) * t * control1.y + 
+                3 * (1 - t) * Math.pow(t, 2) * control2.y + 
+                Math.pow(t, 3) * end.y
+      return { x, y }
+    }
+
+    const currentPoint = i === numSegments ? { ...end } : getBezierPoint(t)
+    segments.push({
+      start: lastPoint,
+      end: currentPoint
+    })
+    lastPoint = currentPoint
+  }
+  return segments
+}
 
 const drawingZoneRef = ref<HTMLElement | null>(null)
 
@@ -77,12 +151,16 @@ usePinch(({ pinching, offset: [s], event }) => {
   pointer: { touch: true }
 })
 
+const isWallRoundMode = computed(() => {
+  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'wall-round'
+})
+
 const isDrawingMode = computed(() => {
-  return selectedTool.value === 'edit' && sidebarSelectedTool.value === 'wall'
+  return selectedTool.value === 'edit' && ['wall', 'wall-flat'].includes(sidebarSelectedTool.value!)
 })
 
 const isSelectionMode = computed(() => {
-  return selectedTool.value === 'selection' && sidebarSelectedTool.value === 'wall'
+  return selectedTool.value === 'selection' && ['wall', 'wall-flat', 'wall-round'].includes(sidebarSelectedTool.value!)
 })
 
 const isDoorSelectionMode = computed(() => {
@@ -96,7 +174,7 @@ const isDoorSelectionMode = computed(() => {
 })
 
 const isRoomSelectionMode = computed(() => {
-  return ['measure'].includes(selectedTool.value) && sidebarSelectedTool.value === 'wall'
+  return selectedTool.value === 'measure'
 })
 
 const isBayWindowMode = computed(() => {
@@ -129,54 +207,47 @@ const getSvgPoint = (event: MouseEvent | Touch): Point => {
 
 const getSnapPoint = (point: Point): Point => {
   let snappedPoint = { ...point }
-  let minDistance = SNAP_TOLERANCE
+  let minDistance = EXTREMITY_SNAP_TOLERANCE
 
-  walls.value.forEach(wall => {
-    // Distance au point de départ du mur
-    const dStart = Math.sqrt(Math.pow(point.x - wall.start.x, 2) + Math.pow(point.y - wall.start.y, 2))
+  // 1. On cherche d'abord les extrémités libres (priorité haute)
+  for (const wall of walls.value) {
+    const dStart = distanceBetween(point, wall.start)
     if (dStart < minDistance) {
       minDistance = dStart
       snappedPoint = { ...wall.start }
     }
-    // Distance au point d'arrivée du mur
-    const dEnd = Math.sqrt(Math.pow(point.x - wall.end.x, 2) + Math.pow(point.y - wall.end.y, 2))
+    const dEnd = distanceBetween(point, wall.end)
     if (dEnd < minDistance) {
       minDistance = dEnd
       snappedPoint = { ...wall.end }
     }
+  }
 
-    // Snapping sur le segment du mur (projection orthogonale)
-    const dx = wall.end.x - wall.start.x
-    const dy = wall.end.y - wall.start.y
-    const wallLengthSquared = dx * dx + dy * dy
-    if (wallLengthSquared > 0) {
-      // Calcul du paramètre t de la projection sur la droite infinie
-      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / wallLengthSquared
-      // On ne considère que la partie sur le segment
-      if (t > 0 && t < 1) {
-        const projection = {
-          x: wall.start.x + t * dx,
-          y: wall.start.y + t * dy
-        }
-        const dProj = Math.sqrt(Math.pow(point.x - projection.x, 2) + Math.pow(point.y - projection.y, 2))
-        if (dProj < minDistance) {
-          minDistance = dProj
-          snappedPoint = projection
-        }
-      }
+  // Si on a déjà trouvé un point d'extrémité, on ne cherche pas à snapper sur le segment
+  if (minDistance < EXTREMITY_SNAP_TOLERANCE) return snappedPoint
+
+  // 2. Sinon, snapping sur le segment du mur (projection orthogonale)
+  minDistance = SNAP_TOLERANCE
+  for (const wall of walls.value) {
+    const projection = projectPointOnSegment(point, wall.start, wall.end)
+    if (projection.t > 0 && projection.t < 1 && projection.distance < minDistance) {
+      minDistance = projection.distance
+      snappedPoint = projection.point
     }
-  })
+  }
 
   return snappedPoint
 }
 
 const isResizeMode = computed(() => {
-  return selectedTool.value === 'resize' && (['window-bay', 'wall'].includes(sidebarSelectedTool.value!))
+  return selectedTool.value === 'resize' && (['window-bay', 'wall', 'wall-flat', 'wall-round'].includes(sidebarSelectedTool.value!))
 })
 
 const isDragging = ref(false)
 const isResizing = ref<'left' | 'right' | null>(null)
 const isResizingWall = ref<'start' | 'end' | null>(null)
+const isDraggingOpening = ref(false)
+const dragOpeningOffset = ref(0)
 const panX = ref(0)
 const panY = ref(0)
 const lastMouseX = ref(0)
@@ -209,8 +280,10 @@ const onWheel = (event: WheelEvent) => {
 }
 
 const onKeyDown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && isDrawingMode.value) {
+  if (event.key === 'Escape' && (isDrawingMode.value || isWallRoundMode.value)) {
     firstPoint.value = null
+    curvePoint1.value = null
+    curvePoint2.value = null
     initialPoint.value = null
     mousePos.value = null
     return
@@ -237,6 +310,7 @@ onUnmounted(() => {
 })
 
 const SNAP_TOLERANCE = 3.0 // Unité SVG (environ 3m dans la config actuelle, couvre l'épaisseur visuelle du mur de 5 unités)
+const EXTREMITY_SNAP_TOLERANCE = 8.0 // Unité SVG (plus large pour les extrémités, impression d'aimant)
 
 const ROOM_ATTACH_TOLERANCE = WALL_STROKE_WIDTH / 2 + SNAP_TOLERANCE
 
@@ -273,8 +347,8 @@ const pointsEqual = (a: Point, b: Point, epsilon = GRAPH_EPSILON) => {
   return almostEqual(a.x, b.x, epsilon) && almostEqual(a.y, b.y, epsilon)
 }
 
-const pointKey = (point: Point, epsilon = GRAPH_EPSILON) => {
-  return `${Math.round(point.x / epsilon)}:${Math.round(point.y / epsilon)}`
+const pointKey = (point: Point, _epsilon = GRAPH_EPSILON) => {
+  return `${Math.round(point.x * 2) / 2}:${Math.round(point.y * 2) / 2}`
 }
 
 const polygonSignedArea = (points: Point[]) => {
@@ -346,19 +420,7 @@ const segmentIntersection = (
 }
 
 const snapPointToWalls = (point: Point) => {
-  let snappedPoint = point
-  let bestDistance = ROOM_ATTACH_TOLERANCE
-
-  for (const wall of walls.value) {
-    const projection = projectPointOnSegment(point, wall.start, wall.end)
-
-    if (projection.distance < bestDistance) {
-      bestDistance = projection.distance
-      snappedPoint = projection.point
-    }
-  }
-
-  return snappedPoint
+  return getSnapPoint(point)
 }
 
 const uniqueOrderedPoints = (points: Point[]) => {
@@ -413,7 +475,7 @@ const buildSplitParametersForWall = (wall: Wall, allWalls: Wall[]) => {
 
   for (const otherWall of allWalls) {
     if (otherWall.id !== wall.id) {
-      const intersection = segmentIntersection(wall.start, wall.end, otherWall.start, otherWall.end)
+      const intersection = segmentIntersection(wall.start, wall.end, otherWall.start, otherWall.end, 0.01)
 
       if (intersection) {
         const projectedIntersection = projectPointOnSegment(intersection, wall.start, wall.end)
@@ -422,12 +484,12 @@ const buildSplitParametersForWall = (wall: Wall, allWalls: Wall[]) => {
     }
 
     const startProjection = projectPointOnSegment(otherWall.start, wall.start, wall.end)
-    if (startProjection.distance <= GRAPH_EPSILON) {
+    if (startProjection.distance <= 2.0) {
       parameters.push(startProjection.t)
     }
 
     const endProjection = projectPointOnSegment(otherWall.end, wall.start, wall.end)
-    if (endProjection.distance <= GRAPH_EPSILON) {
+    if (endProjection.distance <= 2.0) {
       parameters.push(endProjection.t)
     }
   }
@@ -489,6 +551,10 @@ const buildRoomFaces = (inputWalls: Wall[]): RoomFace[] => {
 
     if (fromVertex.id === toVertex.id) continue
 
+    // Vérifier si une arête identique existe déjà (pour éviter les doublons de segments)
+    const existingForward = fromVertex.outgoing.find(e => e.to === toVertex.id)
+    if (existingForward) continue
+
     const forwardId = `edge-${edgeIndex++}`
     const backwardId = `edge-${edgeIndex++}`
 
@@ -515,6 +581,35 @@ const buildRoomFaces = (inputWalls: Wall[]): RoomFace[] => {
 
     fromVertex.outgoing.push(forward)
     toVertex.outgoing.push(backward)
+  }
+
+  for (const [id, vertex] of vertices.entries()) {
+    if (vertex.outgoing.length === 0) {
+      vertices.delete(id)
+    }
+  }
+
+  // Éliminer récursivement les sommets avec moins de 2 arêtes (feuilles et chaînes ouvertes)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [id, vertex] of Array.from(vertices.entries())) {
+      if (vertex.outgoing.length < 2) {
+        for (const edge of vertex.outgoing) {
+          const twin = edges.get(edge.twinId)
+          if (twin) {
+            const neighbor = vertices.get(twin.from)
+            if (neighbor) {
+              neighbor.outgoing = neighbor.outgoing.filter(e => e.id !== twin.id)
+            }
+            edges.delete(edge.twinId)
+          }
+          edges.delete(edge.id)
+        }
+        vertices.delete(id)
+        changed = true
+      }
+    }
   }
 
   for (const vertex of vertices.values()) {
@@ -596,19 +691,22 @@ const buildRoomFaces = (inputWalls: Wall[]): RoomFace[] => {
 
 const onMouseDown = (event: MouseEvent) => {
   if (isRoomSelectionMode.value) {
+    // Si on clique dans le vide (hors d'un polygone qui a .stop), on vide la sélection
     clearRoomSelection()
+    return
   }
 
   if (isResizeMode.value) {
-    const point = snapPointToWalls(getSvgPoint(event))
+    const point = getSvgPoint(event)
+    const snappedPoint = snapPointToWalls(point)
     const threshold = 15 / zoom.value
 
-    // 1. D'abord, vérifier si on clique sur une extrémité du mur sélectionné
-    if (selectedWallIndex.value !== null) {
-      const wall = walls.value[selectedWallIndex.value]
+    // 1. D'abord, vérifier si on clique sur une extrémité du mur sélectionné (pour le resize)
+    if (selectedWallIndices.value.length > 0) {
+      const wall = walls.value[selectedWallIndices.value[0]!]
       if (wall) {
-        const dStart = Math.sqrt(Math.pow(point.x - wall.start.x, 2) + Math.pow(point.y - wall.start.y, 2))
-        const dEnd = Math.sqrt(Math.pow(point.x - wall.end.x, 2) + Math.pow(point.y - wall.end.y, 2))
+        const dStart = Math.sqrt(Math.pow(snappedPoint.x - wall.start.x, 2) + Math.pow(snappedPoint.y - wall.start.y, 2))
+        const dEnd = Math.sqrt(Math.pow(snappedPoint.x - wall.end.x, 2) + Math.pow(snappedPoint.y - wall.end.y, 2))
 
         if (dStart < threshold) {
           isResizingWall.value = 'start'
@@ -620,8 +718,8 @@ const onMouseDown = (event: MouseEvent) => {
       }
     }
 
-    // 2. Ensuite, vérifier les ouvertures (logique existante)
-    let minDistance = Infinity
+    // 2. Vérifier les ouvertures (logique existante)
+    let minDistanceOpening = Infinity
     let closestOpeningId = null
     let handle = null
 
@@ -638,16 +736,16 @@ const onMouseDown = (event: MouseEvent) => {
         const ex = ox + (dx / wallLength) * opening.width
         const ey = oy + (dy / wallLength) * opening.width
 
-        const dLeft = Math.sqrt(Math.pow(point.x - ox, 2) + Math.pow(point.y - oy, 2))
-        const dRight = Math.sqrt(Math.pow(point.x - ex, 2) + Math.pow(point.y - ey, 2))
+        const dLeft = Math.sqrt(Math.pow(snappedPoint.x - ox, 2) + Math.pow(snappedPoint.y - oy, 2))
+        const dRight = Math.sqrt(Math.pow(snappedPoint.x - ex, 2) + Math.pow(snappedPoint.y - ey, 2))
 
-        if (dLeft < threshold && dLeft < minDistance) {
-          minDistance = dLeft
+        if (dLeft < threshold && dLeft < minDistanceOpening) {
+          minDistanceOpening = dLeft
           closestOpeningId = opening.id
           handle = 'left'
         }
-        if (dRight < threshold && dRight < minDistance) {
-          minDistance = dRight
+        if (dRight < threshold && dRight < minDistanceOpening) {
+          minDistanceOpening = dRight
           closestOpeningId = opening.id
           handle = 'right'
         }
@@ -659,12 +757,156 @@ const onMouseDown = (event: MouseEvent) => {
       isResizing.value = handle as unknown as 'left' | 'right'
       return
     }
+
+    // 2.5 Vérifier si on clique sur le corps d'une ouverture pour la sélectionner (sans la redimensionner immédiatement)
+    if (sidebarSelectedTool.value === 'window-bay' || isDoorSelectionMode.value) {
+      let closestOpeningIdSelect = null
+      let minDistanceOpeningSelect = Infinity
+      const selectThreshold = 20 / zoom.value
+
+      walls.value.forEach((wall) => {
+        wall.openings.forEach((opening) => {
+          if (!isDoorSelectionMode.value && opening.variant !== 'bay') return
+
+          const dx = wall.end.x - wall.start.x
+          const dy = wall.end.y - wall.start.y
+          const wallLength = Math.sqrt(dx * dx + dy * dy)
+          if (wallLength === 0) return
+
+          const ox = wall.start.x + dx * opening.position
+          const oy = wall.start.y + dy * opening.position
+          const ex = ox + (dx / wallLength) * opening.width
+          const ey = oy + (dy / wallLength) * opening.width
+
+          // Distance du point au segment de l'ouverture
+          const odx = ex - ox
+          const ody = ey - oy
+          const ol2 = odx * odx + ody * ody
+          let ot = ((point.x - ox) * odx + (point.y - oy) * ody) / ol2
+          ot = Math.max(0, Math.min(1, ot))
+          const dist = Math.sqrt(Math.pow(point.x - (ox + ot * odx), 2) + Math.pow(point.y - (oy + ot * ody), 2))
+
+          if (dist < selectThreshold && dist < minDistanceOpeningSelect) {
+            minDistanceOpeningSelect = dist
+            closestOpeningIdSelect = opening.id
+          }
+        })
+      })
+
+      if (closestOpeningIdSelect) {
+        selectedOpeningId.value = closestOpeningIdSelect
+        selectedWallIndices.value = []
+        isDraggingOpening.value = true
+        
+        // Calculer l'offset initial pour un glissement fluide
+        const sel = selectedOpening.value
+        if (sel) {
+          const dx = sel.wall.end.x - sel.wall.start.x
+          const dy = sel.wall.end.y - sel.wall.start.y
+          const wallLength = Math.sqrt(dx * dx + dy * dy)
+          const clickT = ((point.x - sel.wall.start.x) * dx + (point.y - sel.wall.start.y) * dy) / (wallLength * wallLength)
+          dragOpeningOffset.value = clickT - sel.opening.position
+        }
+        return
+      }
+    }
+
+    // 3. Sinon, permettre de sélectionner un mur en mode resize
+    let minDistanceWall = Infinity
+    let closestWallIndex = null
+    const wallThreshold = 10 / zoom.value
+
+    walls.value.forEach((wall, index) => {
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const l2 = dx * dx + dy * dy
+      if (l2 === 0) return
+      
+      let t = ((point.x - wall.start.x) * dx + (point.y - wall.start.y) * dy) / l2
+      t = Math.max(0, Math.min(1, t))
+      
+      const dist = Math.sqrt(
+        Math.pow(point.x - (wall.start.x + t * dx), 2) +
+        Math.pow(point.y - (wall.start.y + t * dy), 2)
+      )
+      
+      if (dist < minDistanceWall) {
+        minDistanceWall = dist
+        closestWallIndex = index
+      }
+    })
+
+    if (minDistanceWall < wallThreshold) {
+      const clickedWall = walls.value[closestWallIndex!]
+      if (clickedWall?.groupId) {
+        selectedWallIndices.value = walls.value
+          .map((wall, index) => wall.groupId === clickedWall.groupId ? index : -1)
+          .filter(index => index !== -1)
+      } else {
+        selectedWallIndices.value = [closestWallIndex!]
+      }
+      selectedOpeningId.value = null
+    } else {
+      selectedWallIndices.value = []
+      selectedOpeningId.value = null
+    }
+    return
+  }
+
+  if (isWallRoundMode.value) {
+    const rawPoint = getSvgPoint(event)
+    const point = getSnapPoint(rawPoint)
+    // On arrondit pour assurer la cohérence avec le graphe
+    point.x = Math.round(point.x * 2) / 2
+    point.y = Math.round(point.y * 2) / 2
+
+    if (!firstPoint.value) {
+      firstPoint.value = point
+      initialPoint.value = point
+      mousePos.value = point
+    } else if (!curvePoint1.value) {
+      // Deuxième clic : on fixe la fin de la corde
+      const d = Math.sqrt(Math.pow(point.x - firstPoint.value.x, 2) + Math.pow(point.y - firstPoint.value.y, 2))
+      if (d < SNAP_TOLERANCE) return
+
+      curvePoint1.value = point
+      mousePos.value = point
+    } else if (!curvePoint2.value) {
+      // Troisième clic : on fixe le premier point de contrôle
+      curvePoint2.value = point
+      mousePos.value = point
+    } else {
+      // Quatrième clic : on valide la courbe cubique avec le point actuel comme second point de contrôle
+      const segments = generateArcSegments(firstPoint.value, curvePoint1.value, curvePoint2.value, point)
+      
+      const groupId = crypto.randomUUID()
+      segments.forEach(seg => {
+        walls.value.push({
+          id: crypto.randomUUID(),
+          start: seg.start,
+          end: seg.end,
+          openings: [],
+          groupId: groupId
+        })
+      })
+      // Réinitialisation
+      firstPoint.value = null
+      curvePoint1.value = null
+      curvePoint2.value = null
+      initialPoint.value = null
+      mousePos.value = null
+    }
+    return
   }
 
   if (isDrawingMode.value) {
     const rawPoint = getSvgPoint(event)
     const point = snapPointToWalls(rawPoint)
     
+    // On arrondit pour assurer la cohérence avec le graphe
+    point.x = Math.round(point.x * 2) / 2
+    point.y = Math.round(point.y * 2) / 2
+
     // Vérouillage directionnel (orthogonal) si Ctrl est enfoncé
     if (event.ctrlKey && firstPoint.value) {
       const dx = Math.abs(point.x - firstPoint.value.x)
@@ -697,12 +939,16 @@ const onMouseDown = (event: MouseEvent) => {
     if (!firstPoint.value) {
       const rawPoint = getSvgPoint(event)
       const point = getSnapPoint(rawPoint)
+      point.x = Math.round(point.x * 2) / 2
+      point.y = Math.round(point.y * 2) / 2
       firstPoint.value = point
       initialPoint.value = point
       mousePos.value = point
     } else {
       const rawPoint = getSvgPoint(event)
       const point = getSnapPoint(rawPoint)
+      point.x = Math.round(point.x * 2) / 2
+      point.y = Math.round(point.y * 2) / 2
       walls.value.push({
         id: crypto.randomUUID(),
         start: firstPoint.value,
@@ -799,9 +1045,62 @@ const onMouseDown = (event: MouseEvent) => {
     })
 
     if (minDistance < threshold) {
-      selectedWallIndex.value = closestWallIndex
+      const clickedWall = walls.value[closestWallIndex!]
+      if (clickedWall?.groupId) {
+        selectedWallIndices.value = walls.value
+          .map((wall, index) => wall.groupId === clickedWall.groupId ? index : -1)
+          .filter(index => index !== -1)
+      } else {
+        selectedWallIndices.value = [closestWallIndex!]
+      }
+      
+      // Recherche d'une ouverture cliquée pour le drag
+      let closestOpeningIdSelect = null
+      let minDistanceOpeningSelect = Infinity
+      const selectOpeningThreshold = 20 / zoom.value
+
+      clickedWall.openings.forEach((opening) => {
+        const dx = clickedWall.end.x - clickedWall.start.x
+        const dy = clickedWall.end.y - clickedWall.start.y
+        const wallLength = Math.sqrt(dx * dx + dy * dy)
+        if (wallLength === 0) return
+
+        const ox = clickedWall.start.x + dx * opening.position
+        const oy = clickedWall.start.y + dy * opening.position
+        const ex = ox + (dx / wallLength) * opening.width
+        const ey = oy + (dy / wallLength) * opening.width
+
+        // Distance du point au segment de l'ouverture
+        const odx = ex - ox
+        const ody = ey - oy
+        const ol2 = odx * odx + ody * ody
+        let ot = ((point.x - ox) * odx + (point.y - oy) * ody) / ol2
+        ot = Math.max(0, Math.min(1, ot))
+        const dist = Math.sqrt(Math.pow(point.x - (ox + ot * odx), 2) + Math.pow(point.y - (oy + ot * ody), 2))
+
+        if (dist < selectOpeningThreshold && dist < minDistanceOpeningSelect) {
+          minDistanceOpeningSelect = dist
+          closestOpeningIdSelect = opening.id
+        }
+      })
+
+      if (closestOpeningIdSelect) {
+        selectedOpeningId.value = closestOpeningIdSelect
+        selectedWallIndices.value = []
+        isDraggingOpening.value = true
+        
+        // Calculer l'offset initial pour un glissement fluide
+        const sel = selectedOpening.value
+        if (sel) {
+          const dx = sel.wall.end.x - sel.wall.start.x
+          const dy = sel.wall.end.y - sel.wall.start.y
+          const wallLength = Math.sqrt(dx * dx + dy * dy)
+          const clickT = ((point.x - sel.wall.start.x) * dx + (point.y - sel.wall.start.y) * dy) / (wallLength * wallLength)
+          dragOpeningOffset.value = clickT - sel.opening.position
+        }
+      }
     } else {
-      selectedWallIndex.value = null
+      selectedWallIndices.value = []
     }
     return
   }
@@ -839,6 +1138,17 @@ const onMouseDown = (event: MouseEvent) => {
 
     if (minDistance < threshold) {
       selectedOpeningId.value = closestOpeningId
+      isDraggingOpening.value = true
+      
+      // Calculer l'offset initial pour un glissement fluide
+      const sel = selectedOpening.value
+      if (sel) {
+        const dx = sel.wall.end.x - sel.wall.start.x
+        const dy = sel.wall.end.y - sel.wall.start.y
+        const wallLength = Math.sqrt(dx * dx + dy * dy)
+        const clickT = ((point.x - sel.wall.start.x) * dx + (point.y - sel.wall.start.y) * dy) / (wallLength * wallLength)
+        dragOpeningOffset.value = clickT - sel.opening.position
+      }
     } else {
       selectedOpeningId.value = null
     }
@@ -852,10 +1162,92 @@ const onMouseDown = (event: MouseEvent) => {
 }
 
 const onMouseMove = (event: MouseEvent) => {
-  if (isResizingWall.value && selectedWallIndex.value !== null) {
+  if (isDraggingOpening.value && selectedOpeningId.value) {
+    const point = getSvgPoint(event)
+    let currentWall: Wall | null = null
+    let currentOpening: Opening | null = null
+    
+    for (const wall of walls.value) {
+      const opening = wall.openings.find(o => o.id === selectedOpeningId.value)
+      if (opening) {
+        currentWall = wall
+        currentOpening = opening
+        break
+      }
+    }
+
+    if (currentWall && currentOpening) {
+      const dx = currentWall.end.x - currentWall.start.x
+      const dy = currentWall.end.y - currentWall.start.y
+      const wallLength = Math.sqrt(dx * dx + dy * dy)
+      
+      if (wallLength > 0) {
+        let t = ((point.x - currentWall.start.x) * dx + (point.y - currentWall.start.y) * dy) / (wallLength * wallLength)
+        let newT = t - dragOpeningOffset.value
+        const openingTWidth = currentOpening.width / wallLength
+
+        // Si on dépasse les bornes du mur actuel, chercher un mur adjacent
+        if (newT < 0 || newT > 1 - openingTWidth) {
+          const junctionPoint = newT < 0 ? currentWall.start : currentWall.end
+          
+          // Chercher d'autres murs connectés à ce point
+          for (const otherWall of walls.value) {
+            if (otherWall.id === currentWall.id) continue
+            
+            const isStart = otherWall.start.x === junctionPoint.x && otherWall.start.y === junctionPoint.y
+            const isEnd = otherWall.end.x === junctionPoint.x && otherWall.end.y === junctionPoint.y
+            
+            if (isStart || isEnd) {
+              const odx = otherWall.end.x - otherWall.start.x
+              const ody = otherWall.end.y - otherWall.start.y
+              const otherWallLength = Math.sqrt(odx * odx + ody * ody)
+              if (otherWallLength < currentOpening.width) continue // Mur trop court
+
+              // Calculer la projection sur le nouveau mur
+              let otherT = ((point.x - otherWall.start.x) * odx + (point.y - otherWall.start.y) * ody) / (otherWallLength * otherWallLength)
+              
+              // Vérifier si le mouvement de la souris "entre" dans le nouveau mur
+              // Si on vient de la fin du mur précédent vers le début du nouveau mur (isStart)
+              // ou du début du mur précédent vers la fin du nouveau mur (isEnd)
+              if ((isStart && otherT > 0) || (isEnd && otherT < 1)) {
+                // Transférer l'ouverture
+                currentWall.openings = currentWall.openings.filter(o => o.id !== selectedOpeningId.value)
+                otherWall.openings.push(currentOpening)
+                
+                // Recalculer l'offset pour la fluidité sur le nouveau mur
+                // Le point de jonction sur le nouveau mur est otherT_junction (0 ou 1)
+                // On veut que l'ouverture soit positionnée de sorte que la souris garde la même distance relative à son bord
+                const otherOpeningTWidth = currentOpening.width / otherWallLength
+                
+                if (isStart) {
+                  currentOpening.position = 0
+                } else {
+                  currentOpening.position = 1 - otherOpeningTWidth
+                }
+                
+                // Mettre à jour l'offset de drag pour le nouveau mur
+                dragOpeningOffset.value = otherT - currentOpening.position
+                break
+              }
+            }
+          }
+          
+          // Ré-appliquer la limite après tentative de transfert
+          newT = Math.max(0, Math.min(1 - openingTWidth, newT))
+        }
+        
+        currentOpening.position = newT
+      }
+    }
+    return
+  }
+
+  if (isResizingWall.value && selectedWallIndices.value.length > 0) {
     const rawPoint = getSvgPoint(event)
     const point = getSnapPoint(rawPoint)
-    const wall = walls.value[selectedWallIndex.value]
+    point.x = Math.round(point.x * 2) / 2
+    point.y = Math.round(point.y * 2) / 2
+    const wall = walls.value[selectedWallIndices.value[0]!]
     if (wall) {
       const oldPoint = isResizingWall.value === 'start' ? { ...wall.start } : { ...wall.end }
       
@@ -910,9 +1302,20 @@ const onMouseMove = (event: MouseEvent) => {
     return
   }
 
+  if (isWallRoundMode.value && firstPoint.value) {
+    const rawPoint = getSvgPoint(event)
+    const point = getSnapPoint(rawPoint)
+    point.x = Math.round(point.x * 2) / 2
+    point.y = Math.round(point.y * 2) / 2
+    mousePos.value = point
+    return
+  }
+  
   if (isDrawingMode.value && firstPoint.value) {
     const rawPoint = getSvgPoint(event)
     const point = getSnapPoint(rawPoint)
+    point.x = Math.round(point.x * 2) / 2
+    point.y = Math.round(point.y * 2) / 2
     
     // Vérouillage directionnel (orthogonal) si Ctrl est enfoncé
     if (event.ctrlKey) {
@@ -956,9 +1359,14 @@ const onMouseUp = () => {
   isDragging.value = false
   isResizing.value = null
   isResizingWall.value = null
+  isDraggingOpening.value = false
 }
 
 const onTouchStart = (event: TouchEvent) => {
+  if (isRoomSelectionMode.value) {
+    clearRoomSelection()
+    return
+  }
   if (selectedTool.value !== 'move') return
   
   if (event.touches.length === 1) {
@@ -969,10 +1377,77 @@ const onTouchStart = (event: TouchEvent) => {
 }
 
 const onTouchMove = (event: TouchEvent) => {
-  if (isResizingWall.value && selectedWallIndex.value !== null) {
+  if (isDraggingOpening.value && selectedOpeningId.value) {
+    const point = getSvgPoint(event.touches[0]!)
+    let currentWall: Wall | null = null
+    let currentOpening: Opening | null = null
+    
+    for (const wall of walls.value) {
+      const opening = wall.openings.find(o => o.id === selectedOpeningId.value)
+      if (opening) {
+        currentWall = wall
+        currentOpening = opening
+        break
+      }
+    }
+
+    if (currentWall && currentOpening) {
+      const dx = currentWall.end.x - currentWall.start.x
+      const dy = currentWall.end.y - currentWall.start.y
+      const wallLength = Math.sqrt(dx * dx + dy * dy)
+      
+      if (wallLength > 0) {
+        let t = ((point.x - currentWall.start.x) * dx + (point.y - currentWall.start.y) * dy) / (wallLength * wallLength)
+        let newT = t - dragOpeningOffset.value
+        const openingTWidth = currentOpening.width / wallLength
+
+        // Si on dépasse les bornes du mur actuel, chercher un mur adjacent
+        if (newT < 0 || newT > 1 - openingTWidth) {
+          const junctionPoint = newT < 0 ? currentWall.start : currentWall.end
+          
+          for (const otherWall of walls.value) {
+            if (otherWall.id === currentWall.id) continue
+            
+            const isStart = otherWall.start.x === junctionPoint.x && otherWall.start.y === junctionPoint.y
+            const isEnd = otherWall.end.x === junctionPoint.x && otherWall.end.y === junctionPoint.y
+            
+            if (isStart || isEnd) {
+              const odx = otherWall.end.x - otherWall.start.x
+              const ody = otherWall.end.y - otherWall.start.y
+              const otherWallLength = Math.sqrt(odx * odx + ody * ody)
+              if (otherWallLength < currentOpening.width) continue
+
+              let otherT = ((point.x - otherWall.start.x) * odx + (point.y - otherWall.start.y) * ody) / (otherWallLength * otherWallLength)
+              
+              if ((isStart && otherT > 0) || (isEnd && otherT < 1)) {
+                currentWall.openings = currentWall.openings.filter(o => o.id !== selectedOpeningId.value)
+                otherWall.openings.push(currentOpening)
+                
+                const otherOpeningTWidth = currentOpening.width / otherWallLength
+                
+                if (isStart) {
+                  currentOpening.position = 0
+                } else {
+                  currentOpening.position = 1 - otherOpeningTWidth
+                }
+                
+                dragOpeningOffset.value = otherT - currentOpening.position
+                break
+              }
+            }
+          }
+          newT = Math.max(0, Math.min(1 - openingTWidth, newT))
+        }
+        currentOpening.position = newT
+      }
+    }
+    return
+  }
+
+  if (isResizingWall.value && selectedWallIndices.value.length > 0) {
     const rawPoint = getSvgPoint(event.touches[0]!)
     const point = getSnapPoint(rawPoint)
-    const wall = walls.value[selectedWallIndex.value]
+    const wall = walls.value[selectedWallIndices.value[0]!]
     if (wall) {
       const oldPoint = isResizingWall.value === 'start' ? { ...wall.start } : { ...wall.end }
       
@@ -1042,6 +1517,7 @@ const onTouchMove = (event: TouchEvent) => {
 
 const onTouchEnd = (event: TouchEvent) => {
   isResizing.value = null
+  isDraggingOpening.value = false
   if (event.touches.length === 0) {
     isDragging.value = false
   } else if (event.touches.length === 1) {
@@ -1086,17 +1562,100 @@ const cursorStyle = computed(() => {
   return 'default'
 })
 
+const selectedWalls = computed(() => {
+  return selectedWallIndices.value.map(index => walls.value[index]!).filter(wall => !!wall)
+})
+
+const isSelectedGroup = computed(() => {
+  if (selectedWalls.value.length <= 1) return false
+  const firstGroupId = selectedWalls.value[0]?.groupId
+  if (!firstGroupId) return false
+  return selectedWalls.value.every(wall => wall.groupId === firstGroupId)
+})
+
+const groupStartPoint = computed(() => {
+  if (!isSelectedGroup.value) return null
+  return selectedWalls.value[0]?.start || null
+})
+
+const groupEndPoint = computed(() => {
+  if (!isSelectedGroup.value) return null
+  return selectedWalls.value[selectedWalls.value.length - 1]?.end || null
+})
+
+const groupTotalLength = computed(() => {
+  if (!isSelectedGroup.value) return 0
+  return selectedWalls.value.reduce((sum, wall) => {
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    return sum + Math.sqrt(dx * dx + dy * dy)
+  }, 0) / GRID_SECONDARY_UNIT_SIZE
+})
+
+const groupChordLength = computed(() => {
+  if (!groupStartPoint.value || !groupEndPoint.value) return 0
+  const dx = groupEndPoint.value.x - groupStartPoint.value.x
+  const dy = groupEndPoint.value.y - groupStartPoint.value.y
+  return Math.sqrt(dx * dx + dy * dy) / GRID_SECONDARY_UNIT_SIZE
+})
+
 const selectedWall = computed(() => {
-  if (selectedWallIndex.value === null) return null
-  return walls.value[selectedWallIndex.value] || null
+  if (isSelectedGroup.value) {
+    return {
+      start: groupStartPoint.value!,
+      end: groupEndPoint.value!
+    } as Wall
+  }
+  return selectedWalls.value[0] || null
+})
+
+const buildingPoints = computed(() => {
+  if (walls.value.length < 3) return []
+  return walls.value.reduce((acc, wall) => {
+    const startKey = `${Math.round(wall.start.x * 2) / 2},${Math.round(wall.start.y * 2) / 2}`
+    const endKey = `${Math.round(wall.end.x * 2) / 2},${Math.round(wall.end.y * 2) / 2}`
+    if (!acc.some(p => p.key === startKey)) acc.push({ key: startKey, x: wall.start.x, y: wall.start.y })
+    if (!acc.some(p => p.key === endKey)) acc.push({ key: endKey, x: wall.end.x, y: wall.end.y })
+    return acc
+  }, [] as { key: string, x: number, y: number }[])
+})
+
+const buildingArea = computed(() => {
+  if (buildingPoints.value.length < 3) return 0
+  return Math.abs(polygonSignedArea(buildingPoints.value))
+})
+
+const selectedRoomCenter = computed(() => {
+  if (selectedRoomIds.value.length === 0) return { x: 0, y: 0 }
+  
+  // Cas spécial pour le bâtiment complet
+  if (selectedRoomIds.value.includes('global-building')) {
+    if (buildingPoints.value.length === 0) return { x: 0, y: 0 }
+    const sumX = buildingPoints.value.reduce((sum, p) => sum + p.x, 0)
+    const sumY = buildingPoints.value.reduce((sum, p) => sum + p.y, 0)
+    return {
+      x: sumX / buildingPoints.value.length,
+      y: sumY / buildingPoints.value.length
+    }
+  }
+
+  const room = rooms.value.find(r => r.id === selectedRoomIds.value[0])
+  if (!room) return { x: 0, y: 0 }
+  
+  const sumX = room.points.reduce((sum, p) => sum + p.x, 0)
+  const sumY = room.points.reduce((sum, p) => sum + p.y, 0)
+  return {
+    x: sumX / room.points.length,
+    y: sumY / room.points.length
+  }
 })
 
 const selectedWallDistance = computed(() => {
+  if (isSelectedGroup.value) return groupChordLength.value
   if (!selectedWall.value) return 0
   const wall = selectedWall.value
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
-  // GRID_SECONDARY_UNIT_SIZE = 10 unités SVG pour 1 mètre
   return Math.sqrt(dx * dx + dy * dy) / GRID_SECONDARY_UNIT_SIZE
 })
 
@@ -1191,6 +1750,25 @@ const selectedWallMeasurementLines = computed(() => {
   ]
 })
 
+watch([selectedTool, sidebarSelectedTool], (newValues, oldValues) => {
+  const [newTool, newSidebarTool] = newValues
+  const [oldTool, oldSidebarTool] = oldValues
+
+  selectedWallIndices.value = []
+
+  // On ne réinitialise selectedOpeningId que si on ne passe pas de window-bay (edit) à resize (ou inversement)
+  const isMovingToResizeFromBay = oldTool === 'edit' && oldSidebarTool === 'window-bay' && newTool === 'resize'
+  const isMovingToBayFromResize = oldTool === 'resize' && newTool === 'edit' && newSidebarTool === 'window-bay'
+
+  if (!isMovingToResizeFromBay && !isMovingToBayFromResize) {
+    selectedOpeningId.value = null
+  }
+
+  if (selectedTool.value !== 'measure') {
+    clearRoomSelection()
+  }
+})
+
 watch(
     walls,
     (nextWalls) => rooms.value = buildRoomFaces(nextWalls),
@@ -1234,22 +1812,54 @@ watch(
       >
         <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#grid)" />
 
+      <!-- Forme globale du bâtiment (remplissage sans contour) -->
+        <polygon
+            v-if="walls.length >= 3"
+            :points="buildingPoints.map(p => `${p.x},${p.y}`).join(' ')"
+            :fill="selectedRoomIds.includes('global-building') ? '#ffeb3b' : '#f5f5f5'"
+            :fill-opacity="selectedRoomIds.includes('global-building') ? 0.8 : 0.5"
+            stroke="none"
+            pointer-events="all"
+            :style="{ cursor: isRoomSelectionMode ? 'pointer' : undefined }"
+            @mousedown="(event: MouseEvent) => {
+              if (isRoomSelectionMode) {
+                event.preventDefault()
+                event.stopPropagation()
+                toggleRoomSelection('global-building', buildingArea, event.ctrlKey)
+              }
+            }"
+            @touchstart="(event: TouchEvent) => { 
+              if (isRoomSelectionMode) {
+                event.preventDefault()
+                event.stopPropagation()
+                toggleRoomSelection('global-building', buildingArea, false) 
+              }
+            }"
+        />
 
+      <!-- Pièces générées -->
         <polygon
             v-for="room in rooms"
             :key="room.id"
             :points="room.points.map(point => `${point.x},${point.y}`).join(' ')"
-            :fill="selectedRoomIds.includes(room.id) ? '#ffeb3b' : 'transparent'"
-            :fill-opacity="selectedRoomIds.includes(room.id) ? 0.8 : 0"
+            :fill="selectedRoomIds.includes(room.id) ? '#ffeb3b' : room.color"
+            :fill-opacity="selectedRoomIds.includes(room.id) ? 0.8 : 1"
             stroke="none"
             pointer-events="all"
             :style="{ cursor: isRoomSelectionMode ? 'pointer' : undefined }"
-            @click.prevent.stop="(event: MouseEvent) => {
+            @mousedown="(event: MouseEvent) => {
               if (isRoomSelectionMode) {
+                event.preventDefault()
+                event.stopPropagation()
                 toggleRoomSelection(room.id, room.area, event.ctrlKey)
               }
             }"
-            @touchstart.stop="() => { if (isRoomSelectionMode) toggleRoomSelection(room.id, room.area, false) }"
+            @touchstart="(event: TouchEvent) => { 
+              if (isRoomSelectionMode) {
+                event.stopPropagation()
+                toggleRoomSelection(room.id, room.area, false) 
+              }
+            }"
         />
 
         <!-- Murs fixés -->
@@ -1397,73 +2007,112 @@ watch(
           </g>
         </g>
 
-        <!-- Segment sélectionné (on le garde en plus pour l'affichage orange) -->
-        <g v-if="selectedWall">
+        <!-- Murs sélectionnés (affichage orange pour tous les segments du groupe) -->
+        <g v-if="selectedWalls.length > 0">
           <line
-            :x1="selectedWall.start.x"
-            :y1="selectedWall.start.y"
-            :x2="selectedWall.end.x"
-            :y2="selectedWall.end.y"
+            v-for="swall in selectedWalls"
+            :key="swall.id"
+            :x1="swall.start.x"
+            :y1="swall.start.y"
+            :x2="swall.end.x"
+            :y2="swall.end.y"
             stroke="orange"
             :stroke-width="WALL_STROKE_WIDTH"
             stroke-linecap="round"
           />
-          <circle
-            :cx="selectedWall.start.x"
-            :cy="selectedWall.start.y"
-            :r="isResizeMode ? 8 : 6"
-            :fill="isResizeMode ? 'white' : 'orange'"
-            :stroke="isResizeMode ? 'orange' : 'none'"
-            :stroke-width="isResizeMode ? 2 : 0"
-            :style="{ cursor: isResizeMode ? 'move' : 'default' }"
-          />
-          <circle
-            :cx="selectedWall.end.x"
-            :cy="selectedWall.end.y"
-            :r="isResizeMode ? 8 : 6"
-            :fill="isResizeMode ? 'white' : 'orange'"
-            :stroke="isResizeMode ? 'orange' : 'none'"
-            :stroke-width="isResizeMode ? 2 : 0"
-            :style="{ cursor: isResizeMode ? 'move' : 'default' }"
-          />
-          <!-- Flèches en pointillés avec distance (doubles) -->
-          <line
-            v-for="(line, idx) in selectedWallMeasurementLines"
-            :key="idx"
-            :x1="line.x1"
-            :y1="line.y1"
-            :x2="line.x2"
-            :y2="line.y2"
-            stroke="orange"
-            stroke-width="1"
-            stroke-dasharray="4,4"
-            marker-start="url(#arrow)"
-            marker-end="url(#arrow)"
-          />
-          <text
-            fill="orange"
-            font-size="12"
-            text-anchor="middle"
-            alignment-baseline="middle"
-            :transform="`translate(${selectedWallCenter.x}, ${selectedWallCenter.y}) rotate(${selectedWallTextRotation}) translate(0, ${selectedWallTextOffset})`"
-            style="user-select: none; font-weight: bold; paint-order: stroke; stroke: white; stroke-width: 3px;"
-          >
-            {{ selectedWallDistance.toFixed(2) }}m
-          </text>
+          <template v-if="selectedWall">
+            <circle
+              v-if="!isSelectedGroup"
+              :cx="selectedWall.start.x"
+              :cy="selectedWall.start.y"
+              :r="isResizeMode ? 8 : 6"
+              :fill="isResizeMode ? 'white' : 'orange'"
+              :stroke="isResizeMode ? 'orange' : 'none'"
+              :stroke-width="isResizeMode ? 2 : 0"
+              :style="{ cursor: isResizeMode ? 'move' : 'default' }"
+            />
+            <circle
+              v-if="!isSelectedGroup"
+              :cx="selectedWall.end.x"
+              :cy="selectedWall.end.y"
+              :r="isResizeMode ? 8 : 6"
+              :fill="isResizeMode ? 'white' : 'orange'"
+              :stroke="isResizeMode ? 'orange' : 'none'"
+              :stroke-width="isResizeMode ? 2 : 0"
+              :style="{ cursor: isResizeMode ? 'move' : 'default' }"
+            />
+            <!-- Flèches en pointillés avec distance (doubles) -->
+            <line
+              v-for="(line, idx) in selectedWallMeasurementLines"
+              :key="idx"
+              :x1="line.x1"
+              :y1="line.y1"
+              :x2="line.x2"
+              :y2="line.y2"
+              stroke="orange"
+              stroke-width="1"
+              stroke-dasharray="4,4"
+              marker-start="url(#arrow)"
+              marker-end="url(#arrow)"
+            />
+            <text
+              fill="orange"
+              font-size="12"
+              text-anchor="middle"
+              alignment-baseline="middle"
+              :transform="`translate(${selectedWallCenter.x}, ${selectedWallCenter.y}) rotate(${selectedWallTextRotation}) translate(0, ${selectedWallTextOffset})`"
+              style="user-select: none; font-weight: bold; paint-order: stroke; stroke: white; stroke-width: 3px;"
+            >
+              {{ selectedWallDistance.toFixed(2) }}m
+              <template v-if="isSelectedGroup"> (arc: {{ groupTotalLength.toFixed(2) }}m)</template>
+            </text>
+          </template>
+
+          <template v-if="isRoomSelectionMode && selectedRoomIds.length > 0">
+            <text
+                fill="black"
+                font-size="14"
+                text-anchor="middle"
+                alignment-baseline="middle"
+                :x="selectedRoomCenter.x"
+                :y="selectedRoomCenter.y"
+                style="user-select: none; font-weight: bold; paint-order: stroke; stroke: white; stroke-width: 4px;"
+            >
+              {{ (totalSelectedArea / (GRID_SECONDARY_UNIT_SIZE * GRID_SECONDARY_UNIT_SIZE)).toFixed(2) }} m²
+            </text>
+          </template>
         </g>
 
         <!-- Mur de prévisualisation -->
-        <line
-          v-if="firstPoint && mousePos"
-          :x1="firstPoint.x"
-          :y1="firstPoint.y"
-          :x2="mousePos.x"
-          :y2="mousePos.y"
-          stroke="blue"
-          :stroke-width="WALL_STROKE_WIDTH"
-          stroke-dasharray="5,5"
-          stroke-linecap="round"
-        />
+        <template v-if="firstPoint && mousePos">
+          <!-- Si on est en train de définir la courbure -->
+          <template v-if="curvePoint1">
+            <line
+              v-for="(seg, idx) in arcSegments"
+              :key="idx"
+              :x1="seg.start.x"
+              :y1="seg.start.y"
+              :x2="seg.end.x"
+              :y2="seg.end.y"
+              stroke="blue"
+              :stroke-width="WALL_STROKE_WIDTH"
+              stroke-dasharray="5,5"
+              stroke-linecap="round"
+            />
+          </template>
+          <!-- Sinon segment droit classique (corde pour wall-round ou mur normal) -->
+          <line
+            v-else
+            :x1="firstPoint.x"
+            :y1="firstPoint.y"
+            :x2="mousePos.x"
+            :y2="mousePos.y"
+            stroke="blue"
+            :stroke-width="WALL_STROKE_WIDTH"
+            stroke-dasharray="5,5"
+            stroke-linecap="round"
+          />
+        </template>
 
         <!-- Point de départ initial (pour aider à viser la fermeture) -->
         <circle
